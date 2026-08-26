@@ -71,3 +71,60 @@ def sync():
     # per-record detail to decide what to drop from its spool rather than a
     # blanket failure that would make it retry good records for ever.
     return jsonify(result), 200
+
+
+@bp.get('/activity-log/pending')
+@agent_required
+def activity_log_pending():
+    """What the widget's daily card should show right now — empty most of the day.
+
+    Presence is decided here rather than in each client so every client gets the
+    same answer, but the idle counter lives on the laptop, so the agent passes
+    it in.
+    """
+    from app.services import activity_log as AL
+
+    raw = request.args.get('idle_seconds')
+    try:
+        idle_seconds = float(raw) if raw is not None else None
+    except ValueError:
+        idle_seconds = None
+    tracking = request.args.get('tracking', 'true').lower() != 'false'
+
+    return jsonify(AL.pending(db_session, g.agent_user,
+                              idle_seconds=idle_seconds, tracking_enabled=tracking))
+
+
+@bp.post('/activity-log/answer')
+@agent_required
+def activity_log_answer():
+    """Confirm, skip, or leave a day as it was."""
+    from datetime import date as _date
+
+    from app.services import activity_log as AL
+
+    data = request.get_json(silent=True) or {}
+    try:
+        day = _date.fromisoformat(data['date'])
+    except (KeyError, ValueError, TypeError):
+        return jsonify({'error': 'date must be YYYY-MM-DD'}), 400
+
+    status = data.get('status', 'confirmed')
+    if status not in ('confirmed', 'skipped', 'unchanged'):
+        return jsonify({'error': 'unknown status'}), 400
+
+    # 'unchanged' is "leave as is" on a top-up. It cannot go through answer() —
+    # that would overwrite the note with the empty string the card sends
+    # alongside it.
+    if status == 'unchanged':
+        if AL.rebaseline(db_session, g.agent_user, day) is None:
+            return jsonify({'error': 'no answered log to settle'}), 400
+        return jsonify({'ok': True})
+
+    try:
+        AL.answer(db_session, g.agent_user, day, data.get('note'), status)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except LookupError:
+        return jsonify({'error': f'no log for {day}'}), 404
+    return jsonify({'ok': True})

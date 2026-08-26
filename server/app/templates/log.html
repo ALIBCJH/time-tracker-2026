@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Daily log — TimeTracker{% endblock %}
+{% block body %}
+{% if viewing_other %}
+  <div class="notice">Viewing <strong>{{ subject.name }}</strong> ·
+    <a href="{{ url_for('dashboard.index') }}">back to mine</a></div>
+{% endif %}
+<div class="card">
+  <h1>Daily log</h1>
+  <p class="sub">What you said about each day, next to what the machine observed.</p>
+
+  {% for e in entries %}
+    <div class="entry">
+      <div class="row-between">
+        <strong>{{ e.date }}</strong>
+        <span class="num sub">{{ hm(e.tracked_seconds) }}
+          {% if e.status == 'skipped' %}<span class="tag">skipped</span>{% endif %}</span>
+      </div>
+      {% if e.note %}<p class="note">{{ e.note }}</p>{% endif %}
+      <p class="sub observed">{{ e.headline }}</p>
+    </div>
+  {% else %}
+    <p class="sub">No days described yet. The prompt appears in the evening.</p>
+  {% endfor %}
+</div>
+<style>
+  .entry { padding:16px 0; border-bottom:1px solid var(--line); }
+  .entry:last-child { border-bottom:0; }
+  .note { margin:8px 0 4px; }
+  .observed { font-style:italic; margin:0; }
+</style>
+{% endblock %}

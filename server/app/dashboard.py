@@ -120,3 +120,16 @@ def team():
             'status': status,
         })
     return render_template('team.html', rows=rows, hm=R.format_hm)
+
+
+@bp.get('/log')
+@login_required
+def activity_log():
+    """The narrative: what was said about each day, next to what was observed."""
+    from app.services import activity_log as AL
+
+    user = _subject()
+    return render_template('log.html', subject=user,
+                           entries=AL.history(db_session, user, limit=60),
+                           viewing_other=user.id != current_user.id,
+                           hm=R.format_hm)

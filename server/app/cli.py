@@ -18,6 +18,7 @@ from app.services.users import (EmailTaken, create_user, issue_device_token,
 def register(app):
     app.cli.add_command(create_user_cmd)
     app.cli.add_command(close_orphans_cmd)
+    app.cli.add_command(refresh_drafts_cmd)
     app.cli.add_command(list_users_cmd)
     app.cli.add_command(issue_token_cmd)
     app.cli.add_command(revoke_token_cmd)
@@ -96,3 +97,28 @@ def close_orphans_cmd(dry_run):
         click.echo(f"{'would close' if dry_run else 'closed'} #{c['id']} "
                    f"'{c['project']}' at {c['ended_at'].isoformat(timespec='seconds')} "
                    f"(silent {c['silent_for'] // 60}m)")
+
+
+@click.command('refresh-drafts')
+@click.option('--days', default=2, help='How many recent local days to rebuild.')
+@with_appcontext
+def refresh_drafts_cmd(days):
+    """Rebuild the machine's account of recent days for everyone.
+
+    Runs on a schedule in production. Rebuilding a couple of days rather than
+    only today is what lets a day whose usage arrived late — an agent uploading
+    a backlog — get an accurate draft rather than the empty one written while
+    its data was still on a laptop.
+    """
+    from datetime import timedelta
+
+    from app.services import activity_log as AL
+    from app.services import reporting as R
+
+    total = 0
+    for user in db_session.query(User).filter(User.is_active.is_(True)).all():
+        today = R.logical_today(user)
+        for offset in range(days):
+            AL.refresh_draft(db_session, user, today - timedelta(days=offset))
+            total += 1
+    click.echo(f'Refreshed {total} draft(s).')

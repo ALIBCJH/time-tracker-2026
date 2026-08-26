@@ -45,13 +45,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## D. Daily activity log
 
-- [ ] D1  Auto-draft from window titles (`summarize.py` — no model, no network)
-- [ ] D2  Categorisation: Coding / Web / App / Search / Email / Research / Shell
-- [ ] D3  Evening prompt window (21:00–24:00), gated on actual presence
-- [ ] D4  Pending queue — a missed day stays queued indefinitely
-- [ ] D5  Answers: confirm / skip / leave-as-is
-- [ ] D6  Top-up when an answered day gains more undescribed time
-- [ ] D7  Activity-log history
+- [x] D1  Auto-draft from window titles (`summarize.py` — no model, no network)
+- [x] D2  Categorisation: Coding / Web / App / Search / Email / Research / Shell
+- [x] D3  Evening prompt window (21:00–24:00), gated on actual presence
+- [x] D4  Pending queue — a missed day stays queued indefinitely
+- [x] D5  Answers: confirm / skip / leave-as-is
+- [x] D6  Top-up when an answered day gains more undescribed time
+- [x] D7  Activity-log history
 
 ## E. Reporting & email
 

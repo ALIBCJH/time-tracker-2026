@@ -81,14 +81,14 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] F4  Greeting toast on session start
 - [x] F5  Focus cheers every 25 min of non-idle tracking
 - [x] F6  Tray menu — show/hide, dock, pause, dashboard, quit
-- [~] F7  Daily-prompt card — queue + gating done, card UI pending
+- [x] F7  Daily-prompt card
 - [x] F8  Offline detection
 - [x] F9  **NEW** Points at a configurable server URL, carries the agent token
 
 ## G. Multi-user platform — all NEW
 
 - [x] G1  User accounts + login
-- [ ] G2  Password reset
+- [x] G2  Password reset
 - [x] G3  Roles: worker vs admin
 - [x] G4  Per-device agent tokens
 - [x] G5  `user_id` on every table; every query filtered

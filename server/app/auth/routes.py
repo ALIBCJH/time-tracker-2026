@@ -71,3 +71,46 @@ def _safe_next():
     if target.startswith('/') and not target.startswith('//'):
         return target
     return None
+
+
+@bp.route('/reset/<ticket>', methods=['GET', 'POST'])
+def reset(ticket):
+    """Set a new password from an administrator-issued link.
+
+    No email field and no "send me a link" form: an unauthenticated way to make
+    your domain send mail to any address someone types buys nothing in a
+    three-person deployment behind no public sign-up.
+    """
+    from app.auth.passwords import MIN_LENGTH, WeakPassword
+    from app.ratelimit import hit
+    from app.services.passwords import InvalidTicket, redeem
+
+    if request.method == 'GET':
+        return render_template('reset.html', min_length=MIN_LENGTH)
+
+    # Limited on the ticket, so a leaked-but-expired link cannot be used to
+    # grind at the endpoint.
+    allowed, _ = hit(db_session, 'reset', ticket[:64], 20)
+    if not allowed:
+        flash('Too many attempts. Try again in a few minutes.', 'error')
+        return render_template('reset.html', min_length=MIN_LENGTH), 429
+
+    password = request.form.get('password') or ''
+    if password != (request.form.get('confirm') or ''):
+        flash('The two passwords do not match.', 'error')
+        return render_template('reset.html', min_length=MIN_LENGTH), 400
+
+    try:
+        user = redeem(db_session, ticket, password)
+    except WeakPassword as e:
+        flash(str(e), 'error')
+        return render_template('reset.html', min_length=MIN_LENGTH), 400
+    except InvalidTicket:
+        # One message for unknown, expired and already-used alike — which of
+        # the three it is tells an attacker something and the owner nothing.
+        flash('That link is not valid. Ask for a new one.', 'error')
+        return render_template('reset.html', min_length=MIN_LENGTH, spent=True), 400
+
+    session.clear()
+    flash('Password changed. Please sign in.', 'ok')
+    return redirect(url_for('auth.login'))

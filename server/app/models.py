@@ -338,6 +338,30 @@ class ActivityLog(Base):
     )
 
 
+class PasswordReset(Base):
+    """A single-use ticket to set a new password.
+
+    Stored as a hash, like an agent token and for the same reason: the value is
+    high-entropy and random, so a fast hash is right, and a stolen database must
+    not hand anyone a working reset link.
+
+    Rows are kept after use rather than deleted, so "this link was already
+    used" can be answered honestly instead of being indistinguishable from
+    "this link never existed".
+    """
+    __tablename__ = 'password_resets'
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+
+    __table_args__ = (Index('ix_resets_user', 'user_id'),)
+
+
 class RateBucket(Base):
     """One rate-limit counter per (scope, key, window).
 

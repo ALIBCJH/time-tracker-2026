@@ -1,0 +1,6 @@
+# The agent is standard library except for these two: the widget needs Qt and
+# the screenshot encoder needs Pillow. Everything else — the spool, the HTTP
+# client, the capture loop — is stdlib on purpose, because every dependency is
+# one more thing that can fail to install on somebody else's machine.
+PyQt6==6.8.0
+Pillow==11.0.0

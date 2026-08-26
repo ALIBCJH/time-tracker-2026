@@ -20,6 +20,7 @@ def register(app):
     app.cli.add_command(close_orphans_cmd)
     app.cli.add_command(refresh_drafts_cmd)
     app.cli.add_command(send_reports_cmd)
+    app.cli.add_command(reset_password_cmd)
     app.cli.add_command(list_users_cmd)
     app.cli.add_command(issue_token_cmd)
     app.cli.add_command(revoke_token_cmd)
@@ -180,3 +181,39 @@ def send_reports_cmd(email, force, to):
 def timedelta_days(n):
     from datetime import timedelta
     return timedelta(days=n)
+
+
+@click.command('reset-password')
+@click.option('--email', prompt=True)
+@click.option('--send/--no-send', default=False,
+              help='Mail the link as well as printing it.')
+@with_appcontext
+def reset_password_cmd(email, send):
+    """Issue a single-use password-reset link."""
+    import os
+
+    from app.services.passwords import issue
+
+    user = (db_session.query(User)
+            .filter(User.email == normalise_email(email)).one_or_none())
+    if user is None:
+        raise click.ClickException(f'No account for {email}')
+
+    ticket, row = issue(db_session, user)
+    base = os.environ.get('PUBLIC_URL', 'http://localhost:8000').rstrip('/')
+    link = f'{base}/reset/{ticket}'
+
+    click.echo(f'\nSingle-use link for {user.email}, valid until '
+               f'{row.expires_at.strftime("%H:%M UTC on %d %b")}:\n')
+    click.echo(f'  {link}\n')
+    click.echo('Any earlier unused link for this account has stopped working.')
+
+    if send:
+        from app.services import mail
+        mail.send(user.email, 'Set your TimeTracker password',
+                  f'<p>Hello {user.name},</p>'
+                  f'<p>Use this link to set a new password. It works once and '
+                  f'expires in two hours.</p><p><a href="{link}">{link}</a></p>'
+                  f'<p>If you did not ask for this, tell whoever administers '
+                  f'TimeTracker — the link is live until it expires.</p>')
+        click.echo(f'Also mailed to {user.email}.')

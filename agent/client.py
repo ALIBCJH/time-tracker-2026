@@ -62,6 +62,15 @@ class Client:
     def me(self):
         return self._request('GET', '/api/agent/me')
 
+    def activity_log_pending(self, idle_seconds=None, tracking=True):
+        query = f'?idle_seconds={idle_seconds if idle_seconds is not None else ""}'
+        query += f'&tracking={"true" if tracking else "false"}'
+        return self._request('GET', '/api/agent/activity-log/pending' + query)
+
+    def answer_activity_log(self, date, note='', status='confirmed'):
+        return self._request('POST', '/api/agent/activity-log/answer',
+                             {'date': date, 'note': note, 'status': status})
+
     def sync(self, batch):
         return self._request('POST', '/api/agent/sync', batch)
 

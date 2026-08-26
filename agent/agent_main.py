@@ -67,6 +67,7 @@ class Controller:
         self.shots = ScreenshotService(self.spool, shots_dir, self.settings,
                                        backend=backend)
         self.widget = None
+        self.card = None
 
     # ── Timers ───────────────────────────────────────────────────────────────
 
@@ -98,12 +99,42 @@ class Controller:
         from client import AuthError, TransientError
         try:
             idle = self.monitor.idle_source.idle_seconds() if self.monitor else None
-            body = self.client._request(
-                'GET', f'/api/agent/activity-log/pending?idle_seconds={idle or 0}')
-            self.state.set_prompts(body)
+            self.state.set_prompts(self.client.activity_log_pending(idle))
             self.state.note_contact()
-        except (AuthError, TransientError, Exception) as e:
+        except (AuthError, TransientError) as e:
             logger.debug(f'Prompts not refreshed: {e}')
+            return
+        self.show_prompt()
+
+    def show_prompt(self):
+        """Raise the evening card, if one is due and none is already up.
+
+        Only ever one at a time, and never replaced while it is open: replacing
+        a card someone is halfway through typing into loses what they wrote.
+        """
+        if self.card is not None and self.card.isVisible():
+            return
+        prompt = self.state.pending_prompt
+        if prompt is None:
+            return
+
+        from widget.prompt import PromptCard
+        self.card = PromptCard(prompt, self.answer_prompt)
+        if self.widget:
+            geometry = self.widget.frameGeometry()
+            self.card.move(geometry.left(), geometry.bottom() + 10)
+        self.card.show()
+
+    def answer_prompt(self, date, note, status):
+        from client import AuthError, TransientError
+        try:
+            self.client.answer_activity_log(date, note, status)
+            self.state.set_prompts(
+                [p for p in self.state.prompts if p['date'] != date])
+        except (AuthError, TransientError) as e:
+            # The card is already closing. Leaving the day in the queue means
+            # it comes back rather than the answer being silently lost.
+            logger.warning(f'Could not save that day: {e}')
 
     # ── Tray actions ─────────────────────────────────────────────────────────
 

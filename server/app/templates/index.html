@@ -58,6 +58,8 @@
     <a href="{{ url_for('dashboard.history') }}{{ '?user=' ~ subject.id if viewing_other }}">Session history →</a>
     &nbsp;·&nbsp;
     <a href="{{ url_for('dashboard.activity_log') }}{{ '?user=' ~ subject.id if viewing_other }}">Daily log →</a>
+    &nbsp;·&nbsp;
+    <a href="{{ url_for('dashboard.screenshots') }}{{ '?user=' ~ subject.id if viewing_other }}">Screenshots →</a>
   </p>
 </div>
 

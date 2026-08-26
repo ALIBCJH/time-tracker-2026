@@ -77,7 +77,16 @@ def make_user(db):
 
 
 @pytest.fixture
-def flask_app():
+def flask_app(tmp_path, monkeypatch):
+    """A test app with its OWN media root.
+
+    Without this the suite writes fake images into the development store — they
+    turn up in the real gallery and are indistinguishable from captures until
+    something tries to open one.
+    """
+    monkeypatch.setenv('MEDIA_ROOT', str(tmp_path / 'media'))
+    monkeypatch.delenv('S3_BUCKET', raising=False)
+
     from app import create_app
     application = create_app(TESTING=True, WTF_CSRF_ENABLED=False,
                              SECRET_KEY='test-key-not-a-secret')

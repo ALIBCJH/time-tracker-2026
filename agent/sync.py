@@ -1,7 +1,7 @@
 """Draining the spool into the server."""
 import logging
 
-from client import AuthError, TransientError
+from client import AuthError, CapturesDisabled, TransientError
 
 logger = logging.getLogger('agent.sync')
 
@@ -63,3 +63,45 @@ def flush_all(spool, client, max_batches=20):
         if result['sent'] == 0:
             break
     return summary
+
+
+def flush_screenshots(spool, client, limit=10):
+    """Upload queued captures, one request each.
+
+    Deliberately not batched with the JSON sync: images are large, and a failed
+    multi-megabyte request should cost one picture rather than a day of tracked
+    time riding along in the same body.
+    """
+    queued = spool.pending_screenshots(limit=limit)
+    if not queued:
+        return {'sent': 0, 'uploaded': 0, 'status': 'idle'}
+
+    uploaded = 0
+    for row in queued:
+        try:
+            client.upload_screenshot(
+                row['client_uuid'], row['captured_at'], row['full_path'],
+                row['thumb_path'], row['session_client_uuid'])
+        except CapturesDisabled:
+            logger.info('Server has screenshots disabled for this account — '
+                        'dropping the queue rather than retrying.')
+            for pending in queued:
+                spool.screenshot_sent(pending['client_uuid'])
+            return {'sent': len(queued), 'uploaded': 0, 'status': 'disabled'}
+        except AuthError as e:
+            logger.error(f'Agent is not authorised: {e}')
+            return {'sent': len(queued), 'uploaded': uploaded, 'status': 'auth-error'}
+        except TransientError as e:
+            logger.info(f'Capture upload deferred: {e}')
+            return {'sent': len(queued), 'uploaded': uploaded, 'status': 'deferred'}
+        except (OSError, FileNotFoundError) as e:
+            # The file vanished — a cleaned temp directory, say. The row cannot
+            # ever succeed, so retiring it beats retrying it for ever.
+            logger.warning(f'Capture file missing, dropping: {e}')
+            spool.screenshot_failed(row['client_uuid'])
+            continue
+
+        spool.screenshot_sent(row['client_uuid'])
+        uploaded += 1
+
+    return {'sent': len(queued), 'uploaded': uploaded, 'status': 'ok'}

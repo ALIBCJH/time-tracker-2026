@@ -8,6 +8,7 @@ from flask_wtf.csrf import CSRFProtect
 from app import config
 from app.db import db_session
 from app.models import User
+from app.services import storage as storage_module
 
 login_manager = LoginManager()
 csrf = CSRFProtect()
@@ -23,8 +24,14 @@ def create_app(**overrides):
         # is no TLS on localhost and the cookie would never be set at all.
         SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',
         WTF_CSRF_TIME_LIMIT=None,
+        # A capture is ~120KB as WebP; the ceiling is generous enough for a
+        # 4K screen and tight enough that a broken client cannot post a DVD.
+        MAX_CONTENT_LENGTH=12 * 1024 * 1024,
     )
     app.config.update(overrides)
+
+    app.storage = storage_module.build({**os.environ,
+                                        'SECRET_KEY': app.config['SECRET_KEY']})
 
     login_manager.init_app(app)
     login_manager.login_view = 'auth.login'
@@ -49,6 +56,9 @@ def create_app(**overrides):
     @app.teardown_appcontext
     def remove_session(exception=None):
         db_session.remove()
+
+    from app.media import bp as media_bp
+    app.register_blueprint(media_bp)
 
     @app.get('/healthz')
     def healthz():

@@ -128,3 +128,77 @@ def activity_log_answer():
     except LookupError:
         return jsonify({'error': f'no log for {day}'}), 404
     return jsonify({'ok': True})
+
+
+@bp.post('/screenshot')
+@agent_required
+def upload_screenshot():
+    """One capture: the full frame and its thumbnail, in one request.
+
+    Uploaded separately from the JSON batch because images are large — a failed
+    8MB request should cost one capture, not a day of tracked time riding along
+    with it.
+    """
+    import uuid as _uuid
+    from datetime import datetime as _dt
+
+    from flask import current_app
+
+    from app.models import Screenshot, Session
+    from app.services import storage as storage_module
+    from app.services.ingest import RecordError, parse_instant, parse_uuid
+
+    full = request.files.get('full')
+    if full is None:
+        return jsonify({'error': 'a "full" image part is required'}), 400
+    thumb = request.files.get('thumb')
+
+    try:
+        client_uuid = parse_uuid(request.form.get('client_uuid'), 'client_uuid')
+        captured_at = parse_instant(request.form.get('captured_at'), 'captured_at')
+    except RecordError as e:
+        return jsonify({'error': str(e)}), 400
+
+    user = g.agent_user
+    if not user.settings.screenshots_enabled:
+        # Refused rather than silently dropped: an agent whose captures are
+        # being discarded should know, and stop taking them.
+        return jsonify({'error': 'screenshots are disabled for this account'}), 409
+
+    existing = (db_session.query(Screenshot)
+                .filter(Screenshot.user_id == user.id,
+                        Screenshot.client_uuid == client_uuid).one_or_none())
+    if existing is not None:
+        # A retry after a lost response. Storing it again would leave an orphan
+        # object nothing points at.
+        return jsonify({'ok': True, 'duplicate': True}), 200
+
+    session_id = None
+    reference = request.form.get('session_client_uuid')
+    if reference:
+        try:
+            session = (db_session.query(Session)
+                       .filter(Session.user_id == user.id,
+                               Session.client_uuid == _uuid.UUID(reference))
+                       .one_or_none())
+            session_id = session.id if session else None
+        except (ValueError, TypeError):
+            session_id = None
+
+    store = current_app.storage
+    full_bytes = full.read()
+    full_key = storage_module.key_for(user.id, captured_at, client_uuid, 'full')
+    store.put(full_key, full_bytes)
+
+    thumb_key = None
+    if thumb is not None:
+        thumb_key = storage_module.key_for(user.id, captured_at, client_uuid, 'thumb')
+        store.put(thumb_key, thumb.read())
+
+    db_session.add(Screenshot(user_id=user.id, client_uuid=client_uuid,
+                              session_id=session_id, captured_at=captured_at,
+                              full_key=full_key, thumb_key=thumb_key,
+                              bytes_full=len(full_bytes)))
+    g.device.last_seen_at = _dt.now(timezone.utc)
+    db_session.commit()
+    return jsonify({'ok': True, 'key': full_key}), 201

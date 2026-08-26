@@ -257,6 +257,8 @@ class Screenshot(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    client_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
     session_id: Mapped[int | None] = mapped_column(
         ForeignKey('sessions.id', ondelete='SET NULL'))
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -265,7 +267,10 @@ class Screenshot(Base):
     bytes_full: Mapped[int | None] = mapped_column(Integer)
     full_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (Index('ix_screenshots_user_captured', 'user_id', 'captured_at'),)
+    __table_args__ = (
+        Index('ix_screenshots_user_captured', 'user_id', 'captured_at'),
+        UniqueConstraint('user_id', 'client_uuid', name='uq_screenshots_client_uuid'),
+    )
 
 
 class ActivityLog(Base):

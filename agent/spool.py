@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS idle_periods (
     synced_at   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS screenshots (
+    client_uuid         TEXT PRIMARY KEY,
+    session_client_uuid TEXT,
+    captured_at         TEXT NOT NULL,
+    full_path           TEXT NOT NULL,
+    thumb_path          TEXT,
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    dead                INTEGER NOT NULL DEFAULT 0,
+    synced_at           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_shots_pending    ON screenshots(synced_at, dead);
 CREATE INDEX IF NOT EXISTS ix_sessions_pending ON sessions(dirty, dead);
 CREATE INDEX IF NOT EXISTS ix_usage_pending    ON app_usage(synced_at, dead);
 CREATE INDEX IF NOT EXISTS ix_idle_pending     ON idle_periods(synced_at, dead);
@@ -139,6 +151,47 @@ class Spool:
             'window_title, started_at, ended_at) VALUES (?,?,?,?,?,?)',
             (cu, session_client_uuid, app_name, window_title, started_at, ended_at))
         return cu
+
+    def record_screenshot(self, captured_at, full_path, thumb_path=None,
+                          session_client_uuid=None):
+        """Queue a capture. The image files stay on disk until the server has
+        them — the spool row is an index, not the picture."""
+        cu = str(uuid.uuid4())
+        self.conn.execute(
+            'INSERT INTO screenshots (client_uuid, session_client_uuid, captured_at, '
+            'full_path, thumb_path) VALUES (?,?,?,?,?)',
+            (cu, session_client_uuid, captured_at, full_path, thumb_path))
+        return cu
+
+    def pending_screenshots(self, limit=20):
+        """Uploaded one at a time, not in the JSON batch: images are large and a
+        failed 8MB request should cost one capture, not a day of them."""
+        return [dict(r) for r in self.conn.execute(
+            'SELECT * FROM screenshots WHERE synced_at IS NULL AND dead=0 '
+            'ORDER BY captured_at LIMIT ?', (limit,))]
+
+    def screenshot_sent(self, client_uuid):
+        """Mark uploaded and remove the local copies — the server has them now,
+        and a laptop is the one place these should not accumulate."""
+        row = self.conn.execute('SELECT * FROM screenshots WHERE client_uuid=?',
+                                (client_uuid,)).fetchone()
+        if row is None:
+            return
+        for path in (row['full_path'], row['thumb_path']):
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        self.conn.execute(
+            'UPDATE screenshots SET synced_at=?, attempts=0 WHERE client_uuid=?',
+            (now_iso(), client_uuid))
+
+    def screenshot_failed(self, client_uuid):
+        self.conn.execute(
+            'UPDATE screenshots SET attempts = attempts + 1, '
+            'dead = CASE WHEN attempts + 1 >= ? THEN 1 ELSE 0 END '
+            'WHERE client_uuid = ?', (MAX_ATTEMPTS, client_uuid))
 
     def record_idle(self, started_at, ended_at):
         cu = str(uuid.uuid4())
@@ -240,5 +293,7 @@ class Spool:
             'pending_sessions': count('sessions', 'dirty=1 AND dead=0'),
             'pending_app_usage': count('app_usage', 'synced_at IS NULL AND dead=0'),
             'pending_idle': count('idle_periods', 'synced_at IS NULL AND dead=0'),
-            'dead': sum(count(t, 'dead=1') for t in ('sessions',) + _FINISHED),
+            'pending_screenshots': count('screenshots', 'synced_at IS NULL AND dead=0'),
+            'dead': sum(count(t, 'dead=1')
+                        for t in ('sessions', 'screenshots') + _FINISHED),
         }

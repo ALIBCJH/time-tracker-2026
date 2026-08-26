@@ -172,3 +172,52 @@ def report_preview(kind):
     payload = RD.monthly(db_session, user, year, month, now=now)
     _, html = RR.render_monthly(payload, now=now, embed=embed)
     return html
+
+
+@bp.get('/screenshots')
+@login_required
+def screenshots():
+    """The capture gallery for one local day.
+
+    Thumbnails are shown; the full frame is a click away and only exists for a
+    few weeks. A day past that window still has its timeline — the thumbnails
+    outlive the evidence by design.
+    """
+    from datetime import date as _date
+
+    from flask import current_app
+
+    from app.models import Screenshot
+
+    user = _subject()
+    now = datetime.now(timezone.utc)
+    raw = request.args.get('date')
+    try:
+        day = _date.fromisoformat(raw) if raw else R.logical_today(user, now)
+    except ValueError:
+        abort(404)
+
+    start, end = R.day_window(user, day)
+    shots = (db_session.query(Screenshot)
+             .filter(Screenshot.user_id == user.id,
+                     Screenshot.captured_at >= start, Screenshot.captured_at < end)
+             .order_by(Screenshot.captured_at).all())
+
+    store = current_app.storage
+    tz = R.user_tz(user)
+    items = []
+    for shot in shots:
+        # An expired full frame is reported as expired rather than rendered as
+        # a broken image — the difference between "gone on purpose" and "lost".
+        expired = shot.full_deleted_at is not None or not store.exists(shot.full_key)
+        items.append({
+            'at': shot.captured_at.astimezone(tz),
+            'thumb': store.signed_url(shot.thumb_key) if shot.thumb_key else None,
+            'full': None if expired else store.signed_url(shot.full_key),
+            'expired': expired,
+        })
+
+    return render_template('screenshots.html', subject=user, day=day, items=items,
+                           viewing_other=user.id != current_user.id,
+                           prev_day=day - timedelta(days=1),
+                           next_day=day + timedelta(days=1))

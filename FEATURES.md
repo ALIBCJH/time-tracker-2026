@@ -17,12 +17,12 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] A3  Suspend/freeze detection (loop-gap heuristic)
 - [x] A4  App-usage logging — titles normalised at capture so spans do not fragment
 - [x] A5  Idle-period logging — actually written now; the local app never did
-- [ ] A6  Screenshot capture, gated on "session active AND not idle AND enabled"
-- [ ] A7  Thumbnail generation
-- [ ] A8  Capture sound notification
+- [x] A6  Screenshot capture, gated on "session active AND not idle AND enabled"
+- [x] A7  Thumbnail generation
+- [x] A8  Capture sound notification
 - [x] A9  **NEW** Local spool + batched upload, survives a dropped connection
 - [x] A10 **NEW** Per-device agent token, rotatable
-- [ ] A11 **NEW** WebP encoding before upload (~5× smaller than PNG)
+- [x] A11 **NEW** WebP encoding before upload (~5× smaller than PNG)
 
 ## B. Sessions & core data
 
@@ -39,7 +39,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] C1  Today summary — total, status, active session
 - [x] C2  Live status polling
 - [x] C3  Weekly summary view
-- [ ] C4  Screenshot gallery by date
+- [x] C4  Screenshot gallery by date
 - [x] C5  Session history page
 - [ ] C6  Start/stop controls
 
@@ -105,8 +105,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] H2  Gunicorn + Nginx + TLS + domain
 - [ ] H3  Background worker OUT of the web process (4 workers = 4 emails)
 - [x] H4  Timezone-aware datetimes throughout
-- [ ] H5  S3 screenshot storage, private bucket, presigned URLs
-- [ ] H6  S3 lifecycle — full-res 30 days, thumbnails 1 year
+- [x] H5  S3 screenshot storage, private bucket, presigned URLs
+- [x] H6  S3 lifecycle — full-res 30 days, thumbnails 1 year
 - [x] H7  Secrets via environment, never on disk
 - [ ] H8  Docker Compose deploy
 - [ ] H9  Backups + a *tested* restore

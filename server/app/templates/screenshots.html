@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Screenshots — TimeTracker{% endblock %}
+{% block body %}
+{% if viewing_other %}
+  <div class="notice">Viewing <strong>{{ subject.name }}</strong> ·
+    <a href="{{ url_for('dashboard.index') }}">back to mine</a></div>
+{% endif %}
+<div class="card">
+  <div class="row-between">
+    <div>
+      <h1>{{ day.strftime('%A, %d %B %Y') }}</h1>
+      <p class="sub">{{ items|length }} capture{{ '' if items|length == 1 else 's' }}
+        · {{ subject.settings.timezone }}</p>
+    </div>
+    <div class="num">
+      <a href="?date={{ prev_day }}{{ '&user=' ~ subject.id if viewing_other }}">← {{ prev_day.strftime('%d %b') }}</a>
+      &nbsp;·&nbsp;
+      <a href="?date={{ next_day }}{{ '&user=' ~ subject.id if viewing_other }}">{{ next_day.strftime('%d %b') }} →</a>
+    </div>
+  </div>
+
+  {% if items %}
+    <div class="grid">
+      {% for item in items %}
+        <figure>
+          {% if item.full %}<a href="{{ item.full }}" target="_blank" rel="noopener">{% endif %}
+            {% if item.thumb %}
+              <img src="{{ item.thumb }}" alt="Capture at {{ item.at.strftime('%H:%M') }}" loading="lazy">
+            {% else %}
+              <div class="missing">no thumbnail</div>
+            {% endif %}
+          {% if item.full %}</a>{% endif %}
+          <figcaption>{{ item.at.strftime('%H:%M') }}
+            {% if item.expired %}<span class="tag">full frame expired</span>{% endif %}
+          </figcaption>
+        </figure>
+      {% endfor %}
+    </div>
+    <p class="sub" style="margin-top:20px">
+      Full frames are kept 30 days; thumbnails a year. After that the timeline
+      remains and the readable capture does not.</p>
+  {% else %}
+    <p class="sub">No captures for this day.</p>
+  {% endif %}
+</div>
+<style>
+  .grid { display:grid; gap:14px; margin-top:22px;
+          grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); }
+  figure { margin:0; }
+  figure img { width:100%; border-radius:9px; border:1px solid var(--line);
+               display:block; background:var(--bg); }
+  .missing { height:120px; border-radius:9px; border:1px dashed var(--line);
+             display:flex; align-items:center; justify-content:center;
+             color:var(--muted); font-size:12px; }
+  figcaption { font-size:12px; color:var(--muted); padding-top:6px;
+               font-variant-numeric:tabular-nums; }
+</style>
+{% endblock %}

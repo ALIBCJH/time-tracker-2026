@@ -28,19 +28,19 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 - [x] B1  Start/stop session with project + task
 - [x] B2  Active-session state
-- [~] B3  Orphaned-session recovery — heartbeat recorded, server-side capping pending
+- [x] B3  Orphaned-session recovery, capped at the last heartbeat
 - [x] B4  Auto-resume after idle/suspend, without crediting the gap
 - [x] B5  Race-safe start — now a partial unique index, not a Python dance
 - [x] B6  Logical day/week boundaries (`WEEK_CUTOFF_HOUR`)
-- [ ] B7  Session history
+- [x] B7  Session history
 
 ## C. Dashboard (web)
 
-- [ ] C1  Today summary — total, status, active session
-- [ ] C2  Live status polling
-- [ ] C3  Weekly summary view
+- [x] C1  Today summary — total, status, active session
+- [x] C2  Live status polling
+- [x] C3  Weekly summary view
 - [ ] C4  Screenshot gallery by date
-- [ ] C5  Session history page
+- [x] C5  Session history page
 - [ ] C6  Start/stop controls
 
 ## D. Daily activity log
@@ -92,8 +92,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] G3  Roles: worker vs admin
 - [x] G4  Per-device agent tokens
 - [x] G5  `user_id` on every table; every query filtered
-- [~] G6  Admin: team overview — account list done, time data pending
-- [ ] G7  Admin: per-person drill-down
+- [x] G6  Admin: team overview — each person shown in their own timezone
+- [x] G7  Admin: per-person drill-down
 - [ ] G8  Per-user settings — timezone, goals, idle threshold, prompt hours,
           streams, private labels, send times
 - [ ] G9  Per-user email delivery (no shared Gmail app password)

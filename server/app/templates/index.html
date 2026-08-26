@@ -1,12 +1,80 @@
 {% extends "base.html" %}
 {% block body %}
+
+{% if viewing_other %}
+  <div class="notice">Viewing <strong>{{ subject.name }}</strong>
+    ({{ subject.settings.timezone }}) · <a href="{{ url_for('dashboard.index') }}">back to mine</a></div>
+{% endif %}
+
 <div class="card">
-  <h1>Signed in as {{ current_user.name }}</h1>
-  <p class="sub">{{ current_user.email }} · {{ current_user.role }}
-     · {{ current_user.settings.timezone }}</p>
-  <p>Dashboard features land here as they are built — see FEATURES.md, section C.</p>
-  {% if current_user.is_admin %}
-    <p><a href="{{ url_for('dashboard.team') }}">Team overview →</a></p>
-  {% endif %}
+  <div class="row-between">
+    <div>
+      <h1>{{ hm(day.total_seconds) }}</h1>
+      <p class="sub">tracked {{ today.strftime('%A, %d %B') }}
+        · {{ subject.settings.timezone }}</p>
+    </div>
+    <div id="live" class="pill {{ 'on' if status.is_tracking else '' }}">
+      {% if status.is_tracking %}
+        <span class="dot"></span> {{ status.project }} · {{ hm(status.elapsed_seconds) }}
+      {% else %}Not tracking{% endif %}
+    </div>
+  </div>
+
+  <div class="bars">
+    {% set peak = week.days | map(attribute='total_seconds') | max %}
+    {% for d in week.days %}
+      <div class="bar-col">
+        <div class="bar-val">{{ hm(d.total_seconds) if d.total_seconds else '' }}</div>
+        <div class="bar-track">
+          <div class="bar-fill{{ ' today' if d.is_today }}"
+               style="height:{{ (100 * d.total_seconds / peak) if peak else 0 }}%"></div>
+        </div>
+        <div class="bar-lbl{{ ' today' if d.is_today }}">{{ d.label }}</div>
+      </div>
+    {% endfor %}
+  </div>
+  <p class="sub" style="text-align:center;margin-top:10px">
+    {{ hm(week.total_seconds) }} this week · {{ week.week_start.strftime('%d %b') }}
+    – {{ week.week_end.strftime('%d %b') }}</p>
 </div>
+
+<div class="card" style="margin-top:20px">
+  <h2>By project, this week</h2>
+  {% if projects %}
+    {% set top = projects[0].total_seconds %}
+    <table>
+      {% for p in projects %}
+      <tr>
+        <td width="34%">{{ p.project }}</td>
+        <td><div class="meter"><div style="width:{{ 100 * p.total_seconds / top }}%"></div></div></td>
+        <td width="80" align="right" class="num">{{ hm(p.total_seconds) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="sub">Nothing tracked yet this week.</p>
+  {% endif %}
+  <p style="margin-top:18px"><a href="{{ url_for('dashboard.history') }}{{ '?user=' ~ subject.id if viewing_other }}">Session history →</a></p>
+</div>
+
+<script>
+  // Poll only the small status endpoint; the aggregate above is a page load.
+  async function tick() {
+    try {
+      const r = await fetch('{{ url_for("dashboard.api_status") }}{{ "?user=" ~ subject.id if viewing_other }}');
+      if (!r.ok) return;
+      const s = await r.json();
+      const el = document.getElementById('live');
+      el.className = 'pill' + (s.is_tracking ? ' on' : '');
+      el.innerHTML = s.is_tracking
+        ? '<span class="dot"></span> ' + s.project + ' · ' + fmt(s.elapsed_seconds)
+        : 'Not tracking';
+    } catch (e) { /* offline: leave the last known state on screen */ }
+  }
+  function fmt(s) {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m + 'm';
+  }
+  setInterval(tick, 15000);
+</script>
 {% endblock %}

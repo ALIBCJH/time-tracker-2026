@@ -3,15 +3,23 @@
 {% block body %}
 <div class="card">
   <h1>Team</h1>
-  <p class="sub">{{ people|length }} account{{ '' if people|length == 1 else 's' }}</p>
+  <p class="sub">Each person's day is shown in their own timezone.</p>
   <table>
-    <tr><th>Name</th><th>Email</th><th>Role</th><th>Timezone</th><th>Status</th></tr>
-    {% for p in people %}
+    <tr><th>Person</th><th>Local date</th><th align="right">Today</th>
+        <th align="right">This week</th><th>Now</th></tr>
+    {% for r in rows %}
     <tr>
-      <td>{{ p.name }}</td><td>{{ p.email }}</td>
-      <td><span class="tag">{{ p.role }}</span></td>
-      <td>{{ p.settings.timezone if p.settings else '—' }}</td>
-      <td>{{ 'active' if p.is_active else 'disabled' }}</td>
+      <td>
+        <a href="{{ url_for('dashboard.index', user=r.user.id) }}">{{ r.user.name }}</a>
+        {% if r.user.is_admin %}<span class="tag">admin</span>{% endif %}
+        <div class="sub">{{ r.user.email }} · {{ r.user.settings.timezone }}</div>
+      </td>
+      <td class="num">{{ r.local_date.strftime('%a %d %b') }}</td>
+      <td align="right" class="num">{{ hm(r.today_seconds) }}</td>
+      <td align="right" class="num">{{ hm(r.week_seconds) }}</td>
+      <td>{% if r.status.is_tracking %}
+            <span class="tag on"><span class="dot"></span>{{ r.status.project }}</span>
+          {% else %}<span class="sub">idle</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>

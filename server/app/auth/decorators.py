@@ -13,7 +13,7 @@ token leaked from a laptop turning into a login.
 """
 from functools import wraps
 
-from flask import abort, g, jsonify, request
+from flask import abort, current_app, g, jsonify, request
 from flask_login import current_user
 
 from app.auth.tokens import hash_token, looks_like_token
@@ -22,12 +22,19 @@ from app.models import Device, User
 
 
 def admin_required(view):
-    """A person with the admin role. Anyone else gets 404, not 403 — a worker
-    should not learn that an admin area exists."""
+    """A person with the admin role.
+
+    An anonymous visitor is sent to the login page, exactly like any other
+    protected page — behaving differently here would mark the URL as special
+    before anyone has even signed in.
+
+    A signed-in NON-admin gets 404, not 403: they should not learn the page
+    exists at all, and 403 answers that question.
+    """
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not current_user.is_authenticated:
-            abort(401)
+            return current_app.login_manager.unauthorized()
         if current_user.role != 'admin':
             abort(404)
         return view(*args, **kwargs)

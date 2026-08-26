@@ -10,12 +10,14 @@ from flask.cli import with_appcontext
 from app.auth.passwords import WeakPassword
 from app.db import db_session
 from app.models import Device, User
+from app.services.sessions import close_orphaned_sessions
 from app.services.users import (EmailTaken, create_user, issue_device_token,
                                 normalise_email, revoke_device)
 
 
 def register(app):
     app.cli.add_command(create_user_cmd)
+    app.cli.add_command(close_orphans_cmd)
     app.cli.add_command(list_users_cmd)
     app.cli.add_command(issue_token_cmd)
     app.cli.add_command(revoke_token_cmd)
@@ -76,3 +78,21 @@ def revoke_token_cmd(device_id):
         raise click.ClickException('No such device')
     revoke_device(db_session, device)
     click.echo(f'Revoked {device.name} — its agent can no longer upload.')
+
+
+@click.command('close-orphans')
+@click.option('--dry-run', is_flag=True, help='Report what would be closed.')
+@with_appcontext
+def close_orphans_cmd(dry_run):
+    """Cap sessions whose agent has gone silent. Runs on a schedule in
+    production; here so it can be run and inspected by hand."""
+    closed = close_orphaned_sessions(db_session)
+    if dry_run:
+        db_session.rollback()
+    if not closed:
+        click.echo('No orphaned sessions.')
+        return
+    for c in closed:
+        click.echo(f"{'would close' if dry_run else 'closed'} #{c['id']} "
+                   f"'{c['project']}' at {c['ended_at'].isoformat(timespec='seconds')} "
+                   f"(silent {c['silent_for'] // 60}m)")

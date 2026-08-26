@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Sign in — TimeTracker{% endblock %}
+{% block body %}
+<div class="card" style="max-width:420px;margin:6vh auto">
+  <h1>Sign in</h1>
+  <p class="sub">TimeTracker</p>
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="flash">{{ message }}</div>
+  {% endfor %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" value="{{ email }}" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" required>
+    <div style="margin-top:22px"><button type="submit">Sign in</button></div>
+  </form>
+</div>
+{% endblock %}

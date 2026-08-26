@@ -68,6 +68,25 @@ class User(Base):
         CheckConstraint("role IN ('worker', 'admin')", name='ck_users_role'),
     )
 
+    # ── Flask-Login contract ──
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
+    def get_id(self):
+        return str(self.id)
+
+    @property
+    def is_admin(self):
+        return self.role == 'admin'
+
+    def __repr__(self):
+        return f'<User {self.email} ({self.role})>'
+
 
 class UserSettings(Base):
     """Everything the local app hardcoded as a module constant or kept in one

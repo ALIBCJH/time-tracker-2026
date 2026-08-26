@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}TimeTracker{% endblock %}</title>
+  <style>
+    :root { --ink:#0b0b0b; --ink2:#52514e; --muted:#898781; --line:#e1e0d9;
+            --bg:#f2f1ee; --card:#fff; --accent:#2a78d6; --bad:#b3261e; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font:400 15px/1.55 system-ui,-apple-system,'Segoe UI',Arial,sans-serif; }
+    .wrap { max-width:920px; margin:0 auto; padding:32px 20px; }
+    .card { background:var(--card); border:1px solid var(--line);
+            border-radius:14px; padding:28px; }
+    .bar { display:flex; align-items:center; justify-content:space-between;
+           gap:16px; padding:14px 20px; background:#14141b; color:#fff; }
+    .bar a, .bar button { color:#fff; }
+    h1 { font-size:22px; margin:0 0 4px; }
+    .sub { color:var(--muted); font-size:13px; margin:0 0 22px; }
+    label { display:block; font-weight:600; font-size:13px; margin:16px 0 6px; }
+    input[type=email], input[type=password] {
+      width:100%; padding:11px 13px; border:1px solid var(--line);
+      border-radius:9px; font-size:15px; background:#fff; }
+    button { padding:11px 18px; border:0; border-radius:9px;
+             background:var(--accent); color:#fff; font-weight:600;
+             font-size:15px; cursor:pointer; }
+    .flash { padding:11px 14px; border-radius:9px; margin-bottom:16px;
+             font-size:14px; background:#fbe9e7; color:var(--bad); }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+    th { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+         color:var(--muted); }
+    .tag { font-size:12px; padding:2px 8px; border-radius:999px;
+           background:var(--bg); color:var(--ink2); }
+  </style>
+</head>
+<body>
+{% if current_user.is_authenticated %}
+  <div class="bar">
+    <strong>TimeTracker</strong>
+    <span>
+      {{ current_user.name }}
+      {% if current_user.is_admin %}<span class="tag">admin</span>{% endif %}
+      <form method="post" action="{{ url_for('auth.logout') }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button style="background:transparent;padding:4px 8px">Sign out</button>
+      </form>
+    </span>
+  </div>
+{% endif %}
+<div class="wrap">{% block body %}{% endblock %}</div>
+</body>
+</html>

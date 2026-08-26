@@ -32,6 +32,21 @@ def engine():
     admin.dispose()
 
 
+@pytest.fixture(scope='session', autouse=True)
+def _bind_app_session(engine):
+    """Point the application's scoped session at the scratch database.
+
+    Without this the Flask app would keep talking to the development database
+    while the fixtures talk to the test one — tests would pass against real data
+    and truncate nothing they expected to.
+    """
+    import app.db as appdb
+    appdb.db_session.remove()
+    appdb.db_session.configure(bind=engine)
+    yield
+    appdb.db_session.remove()
+
+
 @pytest.fixture
 def db(engine):
     Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -39,6 +54,10 @@ def db(engine):
     yield s
     s.rollback()
     s.close()
+    # The app's session may still hold a transaction open; TRUNCATE would block
+    # on it.
+    import app.db as appdb
+    appdb.db_session.remove()
     # Each test starts from an empty schema so ordering never matters.
     with engine.begin() as c:
         for table in reversed(Base.metadata.sorted_tables):
@@ -53,5 +72,39 @@ def make_user(db):
         u.settings = UserSettings(timezone=tz)
         db.add(u)
         db.commit()
+        return u
+    return _make
+
+
+@pytest.fixture
+def flask_app():
+    from app import create_app
+    application = create_app(TESTING=True, WTF_CSRF_ENABLED=False,
+                             SECRET_KEY='test-key-not-a-secret')
+    with application.app_context():
+        yield application
+
+
+@pytest.fixture
+def client(flask_app):
+    return flask_app.test_client()
+
+
+@pytest.fixture
+def password():
+    return 'a-perfectly-fine-password'
+
+
+@pytest.fixture
+def make_login_user(db, password):
+    """A user created through the real service, so the password is hashed the
+    way production hashes it rather than stubbed."""
+    from app.services.users import create_user
+
+    def _make(email='worker@example.com', role='worker', active=True):
+        u = create_user(db, email, 'Test Person', password, role=role)
+        if not active:
+            u.is_active = False
+            db.commit()
         return u
     return _make

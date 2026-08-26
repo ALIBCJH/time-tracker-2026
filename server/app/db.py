@@ -8,7 +8,7 @@ explicit: one Session per unit of work, closed when it ends.
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 from app.config import DATABASE_URL
 
@@ -28,3 +28,9 @@ def session_scope():
         raise
     finally:
         session.close()
+
+
+# The web app uses a scoped session — one per request, removed on teardown by
+# create_app(). Background workers use session_scope() above instead, because
+# they have no request to scope to.
+db_session = scoped_session(SessionLocal)

@@ -87,12 +87,12 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## G. Multi-user platform — all NEW
 
-- [ ] G1  User accounts + login
+- [x] G1  User accounts + login
 - [ ] G2  Password reset
-- [ ] G3  Roles: worker vs admin
-- [ ] G4  Per-device agent tokens
+- [x] G3  Roles: worker vs admin
+- [x] G4  Per-device agent tokens
 - [x] G5  `user_id` on every table; every query filtered
-- [ ] G6  Admin: team overview
+- [~] G6  Admin: team overview — account list done, time data pending
 - [ ] G7  Admin: per-person drill-down
 - [ ] G8  Per-user settings — timezone, goals, idle threshold, prompt hours,
           streams, private labels, send times

@@ -12,11 +12,11 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## A. Capture agent — runs on each user's machine
 
-- [ ] A1  Active window + app detection (X11 `xdotool`; from `activity.py`)
-- [ ] A2  Idle detection via X11 screensaver counter, 10-min session cutoff
-- [ ] A3  Suspend/freeze detection (loop-gap heuristic)
-- [~] A4  App-usage logging — server ingest done, X11 capture pending
-- [~] A5  Idle-period logging — server ingest done, X11 capture pending
+- [x] A1  Active window + app detection (X11 `xdotool`; from `activity.py`)
+- [x] A2  Idle detection via X11 screensaver counter, 10-min session cutoff
+- [x] A3  Suspend/freeze detection (loop-gap heuristic)
+- [x] A4  App-usage logging — titles normalised at capture so spans do not fragment
+- [x] A5  Idle-period logging — actually written now; the local app never did
 - [ ] A6  Screenshot capture, gated on "session active AND not idle AND enabled"
 - [ ] A7  Thumbnail generation
 - [ ] A8  Capture sound notification
@@ -28,10 +28,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 - [x] B1  Start/stop session with project + task
 - [x] B2  Active-session state
-- [ ] B3  Orphaned-session recovery, capped at last-known activity
-- [ ] B4  Short-gap auto-resume (≤5 min downtime = crash, not absence)
+- [~] B3  Orphaned-session recovery — heartbeat recorded, server-side capping pending
+- [x] B4  Auto-resume after idle/suspend, without crediting the gap
 - [x] B5  Race-safe start — now a partial unique index, not a Python dance
-- [ ] B6  Logical day/week boundaries (`WEEK_CUTOFF_HOUR`)
+- [x] B6  Logical day/week boundaries (`WEEK_CUTOFF_HOUR`)
 - [ ] B7  Session history
 
 ## C. Dashboard (web)

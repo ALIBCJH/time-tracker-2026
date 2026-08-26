@@ -6,6 +6,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from app.auth.passwords import verify_password
 from app.db import db_session
 from app.models import User
+from app.ratelimit import LOGIN_ATTEMPTS, clear, hit
 from app.services.users import normalise_email
 
 bp = Blueprint('auth', __name__)
@@ -22,6 +23,17 @@ def login():
         email = normalise_email(request.form.get('email'))
         password = request.form.get('password') or ''
 
+        # Counted per address AND per source, so one attacker cannot lock every
+        # account out by guessing at each in turn, and cannot spread an attack
+        # across addresses to stay under a single limit either.
+        source = (request.headers.get('X-Forwarded-For', request.remote_addr or '')
+                  .split(',')[0].strip())
+        allowed_email, _ = hit(db_session, 'login-email', email, LOGIN_ATTEMPTS)
+        allowed_source, _ = hit(db_session, 'login-ip', source, LOGIN_ATTEMPTS * 5)
+        if not (allowed_email and allowed_source):
+            flash('Too many attempts. Try again in a few minutes.', 'error')
+            return render_template('login.html', email=email), 429
+
         user = db_session.query(User).filter(User.email == email).one_or_none()
 
         # One message for every failure — unknown email, wrong password and
@@ -33,6 +45,9 @@ def login():
 
         # New session id on privilege change, so a cookie captured before login
         # is worthless afterwards.
+        # Someone who mistypes twice and then gets it right should not be left
+        # sitting next to a lockout.
+        clear(db_session, 'login-email', email)
         session.clear()
         login_user(user, remember=False)
         return redirect(_safe_next() or url_for('dashboard.index'))

@@ -1,0 +1,30 @@
+# Caddy rather than Nginx + certbot: certificates are obtained and renewed
+# automatically, which removes the failure mode where a site goes down because
+# a renewal cron stopped running months ago and nobody noticed.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Screenshot uploads. Above the app's own 12MB ceiling so an oversized
+	# body is refused by the application with a clear error, rather than by
+	# the proxy with an opaque one.
+	request_body {
+		max_size 16MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# Health checks are noise in an access log and reveal nothing useful.
+	@health path /healthz /readyz
+	log_skip @health
+
+	reverse_proxy web:8000 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

@@ -62,7 +62,28 @@ def create_app(**overrides):
 
     @app.get('/healthz')
     def healthz():
+        """Liveness: is this process answering at all.
+
+        Deliberately does NOT touch the database. A liveness check that fails
+        when Postgres is briefly down makes the orchestrator kill and restart
+        every healthy web container at exactly the wrong moment.
+        """
         return jsonify({'status': 'ok'})
+
+    @app.get('/readyz')
+    def readyz():
+        """Readiness: can this process actually serve a request.
+
+        This one does touch the database, which is the difference — a process
+        that cannot reach Postgres should be taken out of rotation, but not
+        killed.
+        """
+        from sqlalchemy import text
+        try:
+            db_session.execute(text('SELECT 1'))
+            return jsonify({'status': 'ready'})
+        except Exception as e:
+            return jsonify({'status': 'not-ready', 'reason': str(e)[:200]}), 503
 
     return app
 

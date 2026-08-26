@@ -12,6 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import DATABASE_URL   # noqa: E402  (needs the path above)
 from app.models import Base           # noqa: E402
+# Imported for its side effect: RateBucket registers itself on Base.metadata,
+# and a model alembic cannot see is a table that silently never gets created.
+import app.ratelimit                    # noqa: E402,F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

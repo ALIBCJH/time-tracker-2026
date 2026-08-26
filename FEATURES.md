@@ -102,13 +102,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 ## H. Infrastructure — all NEW
 
 - [x] H1  Postgres + Alembic migrations
-- [ ] H2  Gunicorn + Nginx + TLS + domain
-- [ ] H3  Background worker OUT of the web process (4 workers = 4 emails)
+- [x] H2  Gunicorn + Caddy (automatic TLS) + domain
+- [x] H3  Background worker OUT of the web process (4 workers = 4 emails)
 - [x] H4  Timezone-aware datetimes throughout
 - [x] H5  S3 screenshot storage, private bucket, presigned URLs
 - [x] H6  S3 lifecycle — full-res 30 days, thumbnails 1 year
 - [x] H7  Secrets via environment, never on disk
-- [ ] H8  Docker Compose deploy
-- [ ] H9  Backups + a *tested* restore
-- [ ] H10 Health checks + log aggregation
-- [ ] H11 Rate limiting on login and ingest
+- [x] H8  Docker Compose deploy
+- [x] H9  Backups + a *tested* restore
+- [x] H10 Health checks (liveness + readiness) and structured logs
+- [x] H11 Rate limiting on login and ingest

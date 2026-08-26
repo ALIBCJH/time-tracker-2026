@@ -19,6 +19,7 @@ def register(app):
     app.cli.add_command(create_user_cmd)
     app.cli.add_command(close_orphans_cmd)
     app.cli.add_command(refresh_drafts_cmd)
+    app.cli.add_command(send_reports_cmd)
     app.cli.add_command(list_users_cmd)
     app.cli.add_command(issue_token_cmd)
     app.cli.add_command(revoke_token_cmd)
@@ -122,3 +123,60 @@ def refresh_drafts_cmd(days):
             AL.refresh_draft(db_session, user, today - timedelta(days=offset))
             total += 1
     click.echo(f'Refreshed {total} draft(s).')
+
+
+@click.command('send-reports')
+@click.option('--email', default=None, help='Only this person.')
+@click.option('--force', default=None,
+              type=click.Choice(['weekly', 'monthly']),
+              help='Send this kind now regardless of schedule — for samples.')
+@click.option('--to', default=None,
+              help='Override the recipient. Use with --force so a sample never '
+                   'reaches whoever the real reports go to.')
+@with_appcontext
+def send_reports_cmd(email, force, to):
+    """Send every report that is due. Runs on a schedule in production."""
+    from datetime import datetime, timezone
+
+    from app.reports import schedule as RS
+    from app.reports import send as RSend
+    from app.services import reporting as R
+
+    query = db_session.query(User).filter(User.is_active.is_(True))
+    if email:
+        query = query.filter(User.email == normalise_email(email))
+    users = query.all()
+    if not users:
+        raise click.ClickException('No matching accounts.')
+
+    now = datetime.now(timezone.utc)
+
+    if force:
+        for user in users:
+            if force == 'weekly':
+                monday = R.week_start(R.logical_today(user, now)) - timedelta_days(7)
+                period, key = (monday,), RS.weekly_key(monday)
+            else:
+                year, month = RS.previous_month(R.logical_today(user, now))
+                period, key = (year, month), RS.monthly_key(year, month)
+
+            images = {}
+            from app.reports import render as RR
+            subject, html = RSend.build(db_session, user, force, period, now=now,
+                                        embed=RR.cid_embedder(images))
+            recipient = to or user.email
+            # A forced send does NOT claim the period: a sample must not consume
+            # the real report that is still due later.
+            from app.services import mail
+            mail.send(recipient, '[Sample] ' + subject, html, images=images,
+                      cc=() if to else user.settings.report_cc)
+            click.echo(f'Sent sample to {recipient}: {subject}')
+        return
+
+    for line in RSend.run_due(db_session, users, now=now):
+        click.echo(' '.join(str(part) for part in line))
+
+
+def timedelta_days(n):
+    from datetime import timedelta
+    return timedelta(days=n)

@@ -1,0 +1,88 @@
+{% extends "email/_shell.html" %}
+{% import "email/_macros.html" as m with context %}
+{% block content %}
+
+  <tr><td align="center" style="padding:36px 36px 4px;">
+    <div style="font:700 52px/1.05 {{ C.font }};color:{{ C.ink }};">{{ hm(r.total_seconds) }}</div>
+    <div style="padding-top:8px;font:400 14px {{ C.font }};color:{{ C.ink2 }};">total time tracked this week</div>
+    {% if delta %}
+      <div style="padding-top:10px;font:600 13px {{ C.font }};color:{{ delta.colour }};">
+        {{ delta.arrow|safe }}&nbsp; {{ hm(delta.seconds) }} {{ delta.word }} than the previous week</div>
+    {% endif %}
+  </td></tr>
+
+  <tr><td style="padding:26px 26px 2px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      {{ m.stat('Peak day', r.peak_day.label if r.peak_day and r.peak_day.total_seconds else '—',
+                hm(r.peak_day.total_seconds) if r.peak_day and r.peak_day.total_seconds else '') }}
+      {{ m.stat('Avg per active day', hm(r.average_seconds), divider=True) }}
+      {{ m.stat('Days active', r.active_days ~ ' of ' ~ r.total_days, divider=True) }}
+    </tr></table>
+  </td></tr>
+
+  {{ m.section('Daily breakdown') }}
+  <tr><td style="padding:10px 36px 0;">
+    {% if chart_daily %}
+      <img src="{{ chart_daily }}" width="520" alt="Hours tracked per day"
+           style="display:block;width:100%;max-width:520px;height:auto;border:0;">
+    {% else %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      {% set peak = r.days | map(attribute='total_seconds') | max %}
+      {% for d in r.days if not d.is_future %}
+        <tr>
+          <td width="96" style="padding:9px 0;font:400 14px {{ C.font }};color:{{ C.ink }};white-space:nowrap;">
+            {{ d.label }}&nbsp; <span style="font:400 12px {{ C.font }};color:{{ C.muted }};">{{ d.date.strftime('%b %d') }}</span>
+          </td>
+          <td style="padding:9px 14px;">{{ m.meter((100 * d.total_seconds / peak) | round | int if peak else 0, C.blue) }}</td>
+          <td width="64" align="right" style="padding:9px 0;font:400 13px {{ C.font }};color:{{ C.ink if d.total_seconds else C.muted }};font-variant-numeric:tabular-nums;">
+            {{ hm(d.total_seconds) }}</td>
+        </tr>
+      {% endfor %}
+      </table>
+    {% endif %}
+  </td></tr>
+
+  {% if chart_mix %}
+    {{ m.section('How the time broke down') }}
+    <tr><td style="padding:14px 36px 0;">
+      <img src="{{ chart_mix }}" width="520" alt="Share of time by category"
+           style="display:block;width:100%;max-width:520px;height:auto;border:0;"></td></tr>
+  {% endif %}
+
+  {% if r.named_activities %}
+    {{ m.section('What I worked on') }}
+    <tr><td style="padding:4px 36px 10px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      {% set top = r.named_activities[0].seconds %}
+      {% for a in r.named_activities %}
+        <tr>
+          <td style="padding:8px 0;font:400 14px {{ C.font }};color:{{ C.ink }};">{{ a.label }}
+            <div style="padding-top:2px;font:400 12px {{ C.font }};color:{{ C.muted }};">{{ a.category }}</div></td>
+          <td style="padding:8px 12px;" valign="top" width="34%">
+            {{ m.meter((100 * a.seconds / top) | round | int if top else 0, C.blue) }}</td>
+          <td align="right" valign="top" width="70"
+              style="padding:8px 0;font:400 13px {{ C.font }};color:{{ C.ink }};font-variant-numeric:tabular-nums;">
+            {{ hm(a.seconds) }}</td>
+        </tr>
+      {% endfor %}
+      {% if r.private_seconds %}
+        <tr>
+          <td style="padding:8px 0;font:400 14px {{ C.font }};color:{{ C.muted }};">Personal &amp; breaks
+            <div style="padding-top:2px;font:400 12px {{ C.font }};color:{{ C.muted }};">Not counted as project work</div></td>
+          <td style="padding:8px 12px;" valign="top">{{ m.meter(2, C.track) }}</td>
+          <td align="right" valign="top" style="padding:8px 0;font:400 13px {{ C.font }};color:{{ C.muted }};font-variant-numeric:tabular-nums;">
+            {{ hm(r.private_seconds) }}</td>
+        </tr>
+      {% endif %}
+      </table>
+    </td></tr>
+  {% else %}
+    {{ m.section('By project') }}
+    <tr><td style="padding:4px 36px 10px;">{{ m.rows(project_rows, colour_of) }}</td></tr>
+  {% endif %}
+{% endblock %}
+
+{% block footer_detail %}
+  Reporting period: Monday {{ r.week_start }} 00:00 &ndash; Sunday {{ r.week_end }} 23:59
+  ({{ r.user.settings.timezone }})
+{% endblock %}

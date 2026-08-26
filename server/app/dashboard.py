@@ -133,3 +133,42 @@ def activity_log():
                            entries=AL.history(db_session, user, limit=60),
                            viewing_other=user.id != current_user.id,
                            hm=R.format_hm)
+
+
+@bp.get('/reports/preview/<kind>')
+@login_required
+def report_preview(kind):
+    """Render a report exactly as it will be sent, in the browser.
+
+    Same rendering as the real email — only the way images are referenced
+    differs — so the preview cannot drift away from what actually arrives.
+    """
+    from datetime import date as _date
+
+    from app.reports import data as RD
+    from app.reports import render as RR
+    from app.reports import schedule as RS
+
+    if kind not in ('weekly', 'monthly'):
+        abort(404)
+
+    user = _subject()
+    now = datetime.now(timezone.utc)
+    embed = RR.data_uri_embedder()
+
+    if kind == 'weekly':
+        raw = request.args.get('week')
+        monday = (_date.fromisoformat(raw) if raw
+                  else R.week_start(R.logical_today(user, now)) - timedelta(days=7))
+        payload = RD.weekly(db_session, user, R.week_start(monday), now=now)
+        _, html = RR.render_weekly(payload, now=now, embed=embed)
+        return html
+
+    raw = request.args.get('month')
+    if raw:
+        year, month = (int(part) for part in raw.split('-')[:2])
+    else:
+        year, month = RS.previous_month(R.logical_today(user, now))
+    payload = RD.monthly(db_session, user, year, month, now=now)
+    _, html = RR.render_monthly(payload, now=now, embed=embed)
+    return html

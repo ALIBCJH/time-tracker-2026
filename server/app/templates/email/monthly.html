@@ -1,0 +1,61 @@
+{% extends "email/_shell.html" %}
+{% import "email/_macros.html" as m with context %}
+{% block content %}
+
+  <tr><td align="center" style="padding:40px 36px 6px;">
+    <div style="font:700 58px/1.05 {{ C.font }};color:{{ C.ink }};">{{ hm(r.total_seconds) }}</div>
+    <div style="padding-top:10px;font:400 14px {{ C.font }};color:{{ C.ink2 }};">total time tracked in {{ r.label }}</div>
+    <div style="padding-top:16px;">
+      {% if r.percent_change is none %}
+        <div style="display:inline-block;padding:7px 14px;border-radius:999px;background:{{ C.track }};font:600 13px {{ C.font }};color:{{ C.ink2 }};">
+          First month tracked</div>
+      {% else %}
+        <div style="display:inline-block;padding:7px 14px;border-radius:999px;background:{{ badge.background }};font:600 13px {{ C.font }};color:{{ badge.colour }};">
+          {{ badge.arrow|safe }}&nbsp; {{ badge.percent }}% &nbsp;<span style="font-weight:400;">vs {{ r.previous_label }} ({{ hm(r.previous_seconds) }})</span></div>
+      {% endif %}
+    </div>
+  </td></tr>
+
+  <tr><td style="padding:30px 26px 2px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      {{ m.stat('Days active', r.active_days ~ ' of ' ~ r.total_days) }}
+      {{ m.stat('Avg per active day', hm(r.average_seconds), divider=True) }}
+      {{ m.stat('Best week', best.label if best else '—', hm(best.seconds) if best else '', divider=True) }}
+    </tr></table>
+  </td></tr>
+
+  {{ m.section('Where the month went', coverage) }}
+  <tr><td style="padding:14px 36px 0;">
+    {% if chart_streams %}
+      <img src="{{ chart_streams }}" width="520" alt="Share of the month by work stream"
+           style="display:block;width:100%;max-width:520px;height:auto;border:0;">
+    {% else %}
+      {{ m.rows(stream_rows, colour_of) }}
+    {% endif %}
+  </td></tr>
+
+  {{ m.section('Week by week') }}
+  <tr><td style="padding:14px 36px 4px;">
+    {% if chart_weeks %}
+      <img src="{{ chart_weeks }}" width="520" alt="Hours tracked per week"
+           style="display:block;width:100%;max-width:520px;height:auto;border:0;">
+    {% else %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      {% set peak = r.weeks | map(attribute='seconds') | max %}
+      {% for w in r.weeks %}
+        <tr>
+          <td width="86" style="padding:9px 0;font:400 14px {{ C.font }};color:{{ C.ink }};">{{ w.label }}</td>
+          <td style="padding:9px 14px;">{{ m.meter((100 * w.seconds / peak) | round | int if peak else 0, C.blue) }}</td>
+          <td width="64" align="right" style="padding:9px 0;font:400 13px {{ C.font }};color:{{ C.ink }};font-variant-numeric:tabular-nums;">
+            {{ hm(w.seconds) }}</td>
+        </tr>
+      {% endfor %}
+      </table>
+    {% endif %}
+  </td></tr>
+{% endblock %}
+
+{% block footer_detail %}
+  Measured: {{ window }}<br>
+  Described {{ r.described_days }} of {{ r.active_days }} active days
+{% endblock %}

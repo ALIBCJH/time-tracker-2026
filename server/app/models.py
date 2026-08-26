@@ -127,6 +127,10 @@ class UserSettings(Base):
     catch_all_stream: Mapped[str] = mapped_column(String(64), nullable=False,
                                                   default='Deep Research')
     private_labels: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # Extra addresses that receive this person's reports — how an admin gets a
+    # copy of a worker's week. A list rather than one field because "the boss
+    # and the accountant" is the normal case, not an exception.
+    report_cc: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     research_labels: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
 
     user: Mapped[User] = relationship(back_populates='settings')

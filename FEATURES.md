@@ -55,23 +55,23 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## E. Reporting & email
 
-- [ ] E1  Weekly report, Mon→Sun, sent Monday 17:00
-- [ ] E2  Week-over-week absolute delta
-- [ ] E3  Daily bar chart (PNG, inline `cid:`)
-- [ ] E4  Category donut
-- [ ] E5  Activity list with private/research label filtering
-- [ ] E6  Project rows
-- [ ] E7  Monthly report, last day of month 21:00
-- [ ] E8  Month-over-month **percentage** change
-- [ ] E9  Work-stream donut (ordered patterns + catch-all)
-- [ ] E10 Week-by-week bars
-- [ ] E11 Coverage caption — described time vs tracked time
-- [ ] E12 Days-described line
-- [ ] E13 Email previews for both reports
-- [ ] E14 Manual send endpoints (recipient override for samples)
+- [x] E1  Weekly report, Mon→Sun, sent Monday 17:00
+- [x] E2  Week-over-week absolute delta
+- [x] E3  Daily bar chart (PNG, inline `cid:`)
+- [x] E4  Category donut
+- [x] E5  Activity list with private/research label filtering
+- [x] E6  Project rows
+- [x] E7  Monthly report, last day of month 21:00
+- [x] E8  Month-over-month **percentage** change
+- [x] E9  Work-stream donut (ordered patterns + catch-all)
+- [x] E10 Week-by-week bars
+- [x] E11 Coverage caption — described time vs tracked time
+- [x] E12 Days-described line
+- [x] E13 Email previews for both reports
+- [x] E14 Manual send endpoints (recipient override for samples)
 - [x] E15 Send-once guards — per user, a DB constraint, not a JSON file
-- [ ] E16 One-off catch-up window for schedule changes
-- [ ] E17 **NEW** "No history is not a missed send" guard on every trigger
+- [x] E16 One-off catch-up window for schedule changes
+- [x] E17 **NEW** "No history is not a missed send" guard on every trigger
 
 ## F. Desktop widget
 
@@ -96,7 +96,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] G7  Admin: per-person drill-down
 - [ ] G8  Per-user settings — timezone, goals, idle threshold, prompt hours,
           streams, private labels, send times
-- [ ] G9  Per-user email delivery (no shared Gmail app password)
+- [x] G9  Per-user email delivery (no shared Gmail app password)
 - [ ] G10 Consent record + a pause control the tracked user holds
 
 ## H. Infrastructure — all NEW
@@ -107,7 +107,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] H4  Timezone-aware datetimes throughout
 - [ ] H5  S3 screenshot storage, private bucket, presigned URLs
 - [ ] H6  S3 lifecycle — full-res 30 days, thumbnails 1 year
-- [ ] H7  Secrets via environment, never on disk
+- [x] H7  Secrets via environment, never on disk
 - [ ] H8  Docker Compose deploy
 - [ ] H9  Backups + a *tested* restore
 - [ ] H10 Health checks + log aggregation

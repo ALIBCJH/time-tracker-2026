@@ -35,14 +35,22 @@ def heartbeat():
 def me():
     """What the agent needs to configure itself — all of it per-user, none of
     it baked into the agent build."""
+    from app.services.consent import is_paused
+
     s = g.agent_user.settings
+    paused = is_paused(g.agent_user)
     return jsonify({
         'user': {'email': g.agent_user.email, 'name': g.agent_user.name},
+        'paused': paused,
+        'paused_until': s.tracking_paused_until.isoformat() if paused else None,
         'settings': {
+            # Reported as off while paused, so an agent that only reads this
+            # much still stops capturing.
+            'screenshots_enabled': s.screenshots_enabled and not paused,
+            'tracking_enabled': not paused,
             'timezone': s.timezone,
             'idle_threshold_seconds': s.idle_threshold_seconds,
             'screenshot_interval_seconds': s.screenshot_interval_seconds,
-            'screenshots_enabled': s.screenshots_enabled,
             'day_goal_seconds': s.day_goal_seconds,
             'week_goal_seconds': s.week_goal_seconds,
         },
@@ -159,7 +167,13 @@ def upload_screenshot():
     except RecordError as e:
         return jsonify({'error': str(e)}), 400
 
+    from app.services.consent import is_paused
+
     user = g.agent_user
+    if is_paused(user):
+        # Enforced here, not by asking the agent nicely. Someone who pauses
+        # should not have to trust a program on their machine to honour it.
+        return jsonify({'error': 'tracking is paused'}), 409
     if not user.settings.screenshots_enabled:
         # Refused rather than silently dropped: an agent whose captures are
         # being discarded should know, and stop taking them.

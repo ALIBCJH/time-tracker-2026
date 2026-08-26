@@ -125,3 +125,12 @@ def test_a_successful_login_resets_the_count(client, db, password):
     for _ in range(LOGIN_ATTEMPTS - 1):
         r = client.post('/login', data={'email': 'a@example.com', 'password': 'wrong'})
     assert r.status_code == 401          # still counting from zero, not locked
+
+
+def test_the_table_exists_without_importing_the_limiter(db):
+    """It used to live in app/ratelimit.py, so whether the table was created at
+    all depended on whether anything had imported that module first — which
+    made Alembic generate an empty migration and made the test schema
+    order-dependent."""
+    from app.models import Base
+    assert 'rate_buckets' in Base.metadata.tables

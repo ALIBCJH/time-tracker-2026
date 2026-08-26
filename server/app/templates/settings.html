@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Settings — TimeTracker{% endblock %}
+{% block body %}
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="notice">{{ message }}</div>
+{% endfor %}
+
+<div class="card">
+  <h1>Tracking</h1>
+  <p class="sub">This switch is yours. Nobody else can change it.</p>
+
+  {% if paused %}
+    <div class="paused">
+      <strong>Tracking is paused</strong>
+      <div class="sub">Until {{ s.tracking_paused_until.strftime('%d %b, %H:%M') }} UTC{% if s.pause_reason %} · {{ s.pause_reason }}{% endif %}</div>
+    </div>
+    <form method="post" action="{{ url_for('dashboard.pause') }}" style="margin-top:14px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="resume">
+      <button type="submit">Resume tracking</button>
+    </form>
+  {% else %}
+    <form method="post" action="{{ url_for('dashboard.pause') }}" style="margin-top:16px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="reason">Reason (optional, only you see it)</label>
+      <input id="reason" name="reason" type="text" maxlength="200">
+      <div class="buttons">
+        {% for label, minutes in presets %}
+          <button type="submit" name="minutes" value="{{ minutes if minutes else '' }}">{{ label }}</button>
+        {% endfor %}
+        <button type="submit" name="action" value="indefinite" class="ghost">Until I turn it back on</button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+
+<form method="post" action="{{ url_for('dashboard.save_settings') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+<div class="card" style="margin-top:20px">
+  <h1>Your preferences</h1>
+  <div class="two">
+    <div>
+      <label for="timezone">Timezone</label>
+      <input id="timezone" name="timezone" value="{{ s.timezone }}">
+      <p class="sub">Days and weeks are measured here, wherever the server is.</p>
+    </div>
+    <div>
+      <label for="idle">Stop a session after this much idle time (minutes)</label>
+      <input id="idle" name="idle_threshold_minutes" value="{{ s.idle_threshold_seconds // 60 }}">
+    </div>
+    <div>
+      <label for="dg">Daily goal (hours)</label>
+      <input id="dg" name="day_goal_hours" value="{{ '%g' % (s.day_goal_seconds / 3600) }}">
+    </div>
+    <div>
+      <label for="wg">Weekly goal (hours)</label>
+      <input id="wg" name="week_goal_hours" value="{{ '%g' % (s.week_goal_seconds / 3600) }}">
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:20px">
+  <h1>Screen captures</h1>
+  <label class="check"><input type="checkbox" name="screenshots_enabled"
+    {{ 'checked' if s.screenshots_enabled }}> Take screen captures while I am working</label>
+  <label for="si">How often (minutes)</label>
+  <input id="si" name="screenshot_interval_minutes" value="{{ s.screenshot_interval_seconds // 60 }}">
+  <p class="sub">Full images are deleted after 30 days; thumbnails after a year.</p>
+</div>
+
+<div class="card" style="margin-top:20px">
+  <h1>Reports</h1>
+  <label class="check"><input type="checkbox" name="reports_enabled"
+    {{ 'checked' if s.reports_enabled }}> Email me weekly and monthly reports</label>
+
+  <label for="private">Never name these in a report</label>
+  <textarea id="private" name="private_labels" rows="4"
+    placeholder="whatsapp&#10;budget">{{ '\n'.join(s.private_labels or []) }}</textarea>
+  <p class="sub">One per line, matched anywhere in an activity name. The time still
+     counts toward your total — it just never gets a line in a report someone
+     else reads.</p>
+
+  <label for="research">Report these as Research rather than hiding them</label>
+  <textarea id="research" name="research_labels" rows="3">{{ '\n'.join(s.research_labels or []) }}</textarea>
+
+  <label for="streams">Work streams for the monthly chart</label>
+  <textarea id="streams" name="streams" rows="5"
+    placeholder="Content Evangelism: content-evangelism, vercel&#10;TimeTracker: timetracker">{% for name, patterns in (s.streams or []) %}{{ name }}: {{ patterns | join(', ') }}
+{% endfor %}</textarea>
+  <p class="sub">One per line, <code>Name: pattern, pattern</code>. First match wins,
+     so put specific ones first.</p>
+
+  <label for="catch">Everything else is called</label>
+  <input id="catch" name="catch_all_stream" value="{{ s.catch_all_stream }}">
+</div>
+
+<p style="margin-top:20px"><button type="submit">Save preferences</button></p>
+</form>
+
+<p class="sub"><a href="{{ url_for('dashboard.consent') }}">What this records →</a></p>
+
+<style>
+  textarea { width:100%; padding:11px 13px; border:1px solid var(--line);
+             border-radius:9px; font:400 14px/1.5 ui-monospace,monospace;
+             background:#fff; }
+  .two { display:grid; gap:0 22px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .check { font-weight:400; display:flex; gap:9px; align-items:center; margin:8px 0 18px; }
+  .check input { width:auto; }
+  .buttons { display:flex; gap:9px; flex-wrap:wrap; margin-top:18px; }
+  .ghost { background:transparent; color:var(--ink2); border:1px solid var(--line); }
+  .paused { background:#fff8e6; border:1px solid #f0dfae; border-radius:10px;
+            padding:14px 16px; margin-top:16px; }
+  code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:13px; }
+</style>
+{% endblock %}

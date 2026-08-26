@@ -7,7 +7,8 @@ Benson's Tuesday started is a fact about Benson.
 """
 from datetime import date, datetime, timedelta, timezone
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import (Blueprint, abort, flash, jsonify, redirect,
+                   render_template, request, url_for)
 from flask_login import current_user, login_required
 
 from app.auth.decorators import admin_required
@@ -16,6 +17,31 @@ from app.models import Session, User
 from app.services import reporting as R
 
 bp = Blueprint('dashboard', __name__)
+
+# Pages reachable before the policy has been accepted. Everything else is
+# gated: someone must be able to read what is collected, and to leave, without
+# first agreeing to it.
+CONSENT_EXEMPT = {'dashboard.consent', 'dashboard.accept_consent'}
+
+
+@bp.before_request
+def require_consent():
+    """Nothing is shown until the policy is accepted.
+
+    The gate is on the dashboard, not the API, and that is on purpose: a person
+    who has not yet agreed should see the policy rather than their colleague's
+    week, but an agent already installed must keep uploading rather than
+    silently losing a day while someone reads a page.
+    """
+    from app.services.consent import has_consented
+
+    if not current_user.is_authenticated:
+        return None
+    if request.endpoint in CONSENT_EXEMPT:
+        return None
+    if has_consented(db_session, current_user):
+        return None
+    return redirect(url_for('dashboard.consent'))
 
 
 def _subject():
@@ -221,3 +247,117 @@ def screenshots():
                            viewing_other=user.id != current_user.id,
                            prev_day=day - timedelta(days=1),
                            next_day=day + timedelta(days=1))
+
+
+# ── Consent, pause, settings ─────────────────────────────────────────────────
+
+@bp.get('/consent')
+@login_required
+def consent():
+    from app.services import consent as C
+    return render_template('consent.html', collected=C.COLLECTED,
+                           who_can_see=C.WHO_CAN_SEE, version=C.POLICY_VERSION,
+                           already=C.has_consented(db_session, current_user),
+                           history=C.history(db_session, current_user))
+
+
+@bp.post('/consent')
+@login_required
+def accept_consent():
+    from app.services import consent as C
+    source = (request.headers.get('X-Forwarded-For', request.remote_addr or '')
+              .split(',')[0].strip())
+    C.record(db_session, current_user, source_ip=source)
+    return redirect(url_for('dashboard.index'))
+
+
+@bp.post('/pause')
+@login_required
+def pause():
+    """Only ever the signed-in person's own tracking.
+
+    An admin cannot pause or resume somebody else — the control belongs to the
+    person being recorded, and a switch someone else can flip is not a control.
+    """
+    from app.services import consent as C
+
+    action = request.form.get('action')
+    reason = request.form.get('reason')
+    if action == 'resume':
+        C.resume(db_session, current_user)
+        flash('Tracking resumed.', 'ok')
+    elif action == 'indefinite':
+        C.pause_indefinitely(db_session, current_user, reason)
+        flash('Tracking paused until you resume it.', 'ok')
+    else:
+        raw = request.form.get('minutes')
+        minutes = int(raw) if raw and raw.isdigit() else None
+        C.pause(db_session, current_user, minutes, reason)
+        flash('Tracking paused.', 'ok')
+    return redirect(url_for('dashboard.settings'))
+
+
+@bp.get('/settings')
+@login_required
+def settings():
+    from app.services import consent as C
+    return render_template('settings.html', s=current_user.settings,
+                           paused=C.is_paused(current_user),
+                           presets=C.PAUSE_PRESETS, hm=R.format_hm)
+
+
+@bp.post('/settings')
+@login_required
+def save_settings():
+    """Your own settings only — there is no ?user= here at all."""
+    from zoneinfo import ZoneInfo, available_timezones
+
+    s = current_user.settings
+    form = request.form
+
+    zone = (form.get('timezone') or '').strip()
+    if zone and zone in available_timezones():
+        s.timezone = zone
+
+    for field, low, high in (('day_goal_hours', 1, 24), ('week_goal_hours', 1, 168)):
+        raw = form.get(field)
+        if raw and raw.replace('.', '', 1).isdigit() and low <= float(raw) <= high:
+            setattr(s, field.replace('_hours', '_seconds'), int(float(raw) * 3600))
+
+    raw = form.get('idle_threshold_minutes')
+    if raw and raw.isdigit() and 1 <= int(raw) <= 120:
+        s.idle_threshold_seconds = int(raw) * 60
+
+    raw = form.get('screenshot_interval_minutes')
+    if raw and raw.isdigit() and 1 <= int(raw) <= 120:
+        s.screenshot_interval_seconds = int(raw) * 60
+
+    s.screenshots_enabled = form.get('screenshots_enabled') == 'on'
+    s.reports_enabled = form.get('reports_enabled') == 'on'
+    s.private_labels = _lines(form.get('private_labels'))
+    s.research_labels = _lines(form.get('research_labels'))
+    s.streams = _streams(form.get('streams'))
+    s.catch_all_stream = (form.get('catch_all_stream') or 'Deep Research').strip()[:64]
+
+    db_session.commit()
+    flash('Settings saved.', 'ok')
+    return redirect(url_for('dashboard.settings'))
+
+
+def _lines(text):
+    return [line.strip() for line in (text or '').splitlines() if line.strip()]
+
+
+def _streams(text):
+    """One stream per line: "Name: pattern, pattern, pattern".
+
+    A textarea rather than a form builder — this is edited a few times a year by
+    three people, and the shape is easier to read than to click through.
+    """
+    streams = []
+    for line in _lines(text):
+        name, _, patterns = line.partition(':')
+        parts = [p.strip() for p in patterns.split(',') if p.strip()]
+        if name.strip() and parts:
+            streams.append([name.strip()[:64], parts])
+    return streams

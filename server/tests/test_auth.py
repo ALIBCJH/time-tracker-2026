@@ -65,6 +65,7 @@ def test_correct_credentials_sign_in(client, make_login_user, password):
     make_login_user()
     r = client.post('/login', data={'email': 'worker@example.com', 'password': password})
     assert r.status_code == 302
+    client.post('/consent')          # the dashboard is gated behind the policy
     assert client.get('/').status_code == 200
 
 
@@ -133,12 +134,14 @@ def test_a_worker_cannot_see_the_admin_area(client, make_login_user, password):
     """404, not 403 — a worker should not learn the page exists."""
     make_login_user(role='worker')
     client.post('/login', data={'email': 'worker@example.com', 'password': password})
+    client.post('/consent')
     assert client.get('/admin/team').status_code == 404
 
 
 def test_an_admin_can(client, make_login_user, password):
     make_login_user(email='boss@example.com', role='admin')
     client.post('/login', data={'email': 'boss@example.com', 'password': password})
+    client.post('/consent')
     r = client.get('/admin/team')
     assert r.status_code == 200 and b'boss@example.com' in r.data
 

@@ -13,25 +13,15 @@ because a looping client can bury the server without meaning any harm at all.
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, text
+from sqlalchemy import text
 
-from app.models import Base
+from app.models import RateBucket  # noqa: F401  (re-exported for callers)
 
 logger = logging.getLogger('ratelimit')
 UTC = timezone.utc
 
 LOGIN_ATTEMPTS = 10
 LOGIN_WINDOW = timedelta(minutes=15)
-
-
-class RateBucket(Base):
-    """One counter per (scope, key) window."""
-    __tablename__ = 'rate_buckets'
-
-    scope = Column(String(32), primary_key=True)
-    key = Column(String(255), primary_key=True)
-    window_start = Column(DateTime(timezone=True), primary_key=True)
-    count = Column(Integer, nullable=False, default=0)
 
 
 def _window(now, length):

@@ -355,6 +355,7 @@ def test_the_log_page_shows_answered_days(client, db, user, password):
     AL.refresh_draft(db, user, DAY, now=at(2026, 8, 26, 22))
     AL.answer(db, user, DAY, 'A distinctive sentence.', now=at(2026, 8, 26, 22))
     client.post('/login', data={'email': 'a@example.com', 'password': password})
+    client.post('/consent')          # every page is gated behind the policy
     assert b'A distinctive sentence.' in client.get('/log').data
 
 
@@ -364,4 +365,5 @@ def test_the_log_page_is_scoped_to_you(client, db, user, password):
     AL.refresh_draft(db, other, DAY, now=at(2026, 8, 26, 22))
     AL.answer(db, other, DAY, 'SomeoneElsesSecret', now=at(2026, 8, 26, 22))
     client.post('/login', data={'email': 'a@example.com', 'password': password})
+    client.post('/consent')          # every page is gated behind the policy
     assert b'SomeoneElsesSecret' not in client.get(f'/log?user={other.id}').data

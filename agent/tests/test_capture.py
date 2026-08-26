@@ -353,3 +353,48 @@ def test_the_stored_title_is_the_clean_one(rig):
     window.app = 'chrome'
     monitor.tick(T0 + timedelta(minutes=10), mono=5)
     assert usage_rows(spool)[0]['window_title'] == 'Building the thing'
+
+
+# ── The pause ────────────────────────────────────────────────────────────────
+
+class Paused:
+    """A settings object that says tracking is paused."""
+    paused = True
+
+    def get(self, key, default=None):
+        return {'screenshots_enabled': False, 'tracking_enabled': False}.get(key, default)
+
+
+def test_a_paused_agent_records_nothing(rig):
+    """The server would refuse the uploads anyway. Not recording is the
+    difference between "your data is discarded" and "your data is not
+    collected"."""
+    monitor, spool, idle, window = rig
+    monitor.settings = Paused()
+    monitor.tick(T0, mono=0)
+    assert usage_rows(spool) == []
+    assert spool.stats()['pending_app_usage'] == 0
+
+
+def test_pausing_closes_an_open_session(rig):
+    monitor, spool, idle, window = rig
+    spool.start_session('Alpha')
+    monitor.settings = Paused()
+    result = monitor.tick(T0, mono=0)
+    assert 'paused' in result['events']
+    assert spool.open_session() is None
+
+
+def test_a_paused_tick_reports_itself(rig):
+    monitor, spool, idle, window = rig
+    monitor.settings = Paused()
+    assert monitor.tick(T0, mono=0)['paused'] is True
+
+
+def test_pausing_repeatedly_is_harmless(rig):
+    monitor, spool, idle, window = rig
+    spool.start_session('Alpha')
+    monitor.settings = Paused()
+    for i in range(3):
+        monitor.tick(T0 + timedelta(seconds=i * 5), mono=i * 5)
+    assert spool.open_session() is None

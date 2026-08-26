@@ -94,10 +94,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] G5  `user_id` on every table; every query filtered
 - [x] G6  Admin: team overview — each person shown in their own timezone
 - [x] G7  Admin: per-person drill-down
-- [ ] G8  Per-user settings — timezone, goals, idle threshold, prompt hours,
+- [x] G8  Per-user settings — timezone, goals, idle threshold, prompt hours,
           streams, private labels, send times
 - [x] G9  Per-user email delivery (no shared Gmail app password)
-- [ ] G10 Consent record + a pause control the tracked user holds
+- [x] G10 Consent record + a pause control the tracked user holds
 
 ## H. Infrastructure — all NEW
 

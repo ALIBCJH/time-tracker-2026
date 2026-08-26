@@ -35,8 +35,13 @@ class ActivityMonitor:
                  idle_threshold=600, poll_interval=POLL_INTERVAL,
                  suspend_factor=SUSPEND_GAP_FACTOR,
                  min_span=MIN_SPAN_SECONDS,
-                 heartbeat_interval=HEARTBEAT_INTERVAL):
+                 heartbeat_interval=HEARTBEAT_INTERVAL,
+                 settings=None):
         self.spool = spool
+        # Server-held settings, if the agent is polling them. None means the
+        # loop runs on its constructor arguments alone, which is what the tests
+        # and a first run before the first poll do.
+        self.settings = settings
         self.idle_source = idle_source
         self.window_source = window_source
         self.idle_threshold = idle_threshold
@@ -111,6 +116,21 @@ class ActivityMonitor:
         mono = time.monotonic() if mono is None else mono
         events = []
 
+        if self.settings is not None and self.settings.paused:
+            # Close whatever is open, once, and record nothing further. The
+            # server would refuse the uploads anyway; not recording is the
+            # difference between "your data is discarded" and "your data is
+            # not collected".
+            if self.spool.open_session() is not None:
+                self._flush_span(now)
+                session = self.spool.open_session()
+                self.spool.stop_session(session['client_uuid'], now.isoformat())
+                events.append('paused')
+                logger.info('Tracking paused — session closed')
+            self._last_mono = mono
+            return {'idle_seconds': 0.0, 'is_idle': self.is_idle,
+                    'paused': True, 'events': events}
+
         try:
             idle_for = float(self.idle_source.idle_seconds())
         except Exception as e:
@@ -142,7 +162,8 @@ class ActivityMonitor:
             events += self._sample_window(now)
             self._maybe_heartbeat(now)
 
-        return {'idle_seconds': idle_for, 'is_idle': self.is_idle, 'events': events}
+        return {'idle_seconds': idle_for, 'is_idle': self.is_idle,
+                'paused': False, 'events': events}
 
     def _sample_window(self, now):
         if not self.window_source:

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}What this records — TimeTracker{% endblock %}
+{% block body %}
+<div class="card" style="max-width:640px;margin:0 auto">
+  <h1>What this records</h1>
+  <p class="sub">Please read this before you start. It is short on purpose.</p>
+
+  {% for title, detail in collected %}
+    <div class="item">
+      <strong>{{ title }}</strong>
+      <p class="sub">{{ detail }}</p>
+    </div>
+  {% endfor %}
+
+  <h2 style="margin-top:28px">Who can see it</h2>
+  <ul class="plain">
+    {% for line in who_can_see %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+
+  <h2 style="margin-top:28px">You can stop it</h2>
+  <p>You can pause tracking at any time from your settings — for fifteen
+     minutes, for the rest of the day, or until you turn it back on. While it
+     is paused nothing is recorded and nothing is uploaded, and nobody else can
+     turn it back on for you.</p>
+
+  {% if already %}
+    <p class="sub" style="margin-top:24px">You accepted this on
+      {{ history[0].accepted_at.strftime('%d %B %Y') }}.
+      <a href="{{ url_for('dashboard.index') }}">Back to your dashboard →</a></p>
+  {% else %}
+    <form method="post" style="margin-top:28px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">I have read this and I agree</button>
+      <p class="sub" style="margin-top:12px">Version {{ version }}. If what is
+        recorded ever changes, you will be asked again.</p>
+    </form>
+  {% endif %}
+</div>
+<style>
+  .item { padding:14px 0; border-bottom:1px solid var(--line); }
+  .item p { margin:6px 0 0; }
+  ul.plain { padding-left:20px; }
+  ul.plain li { margin:6px 0; }
+</style>
+{% endblock %}

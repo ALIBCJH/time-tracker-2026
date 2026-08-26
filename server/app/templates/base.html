@@ -70,6 +70,7 @@
     <span>
       {{ current_user.name }}
       {% if current_user.is_admin %}<span class="tag">admin</span>{% endif %}
+      <a href="/settings" style="margin:0 10px">Settings</a>
       <form method="post" action="{{ url_for('auth.logout') }}" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button style="background:transparent;padding:4px 8px">Sign out</button>

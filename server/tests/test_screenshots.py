@@ -191,7 +191,11 @@ def test_captures_are_refused_when_the_user_has_them_off(db, user, agent):
 # ── Seeing them ──────────────────────────────────────────────────────────────
 
 def sign_in(client, email, password):
+    # Accepting the policy is part of signing in for test purposes: almost every
+    # page is gated behind consent, so a helper that only logs in would land
+    # every test on the policy page instead of the thing it meant to check.
     client.post('/login', data={'email': email, 'password': password})
+    return client.post('/consent')
 
 
 def test_the_gallery_shows_the_days_captures(client, db, user, agent, password):

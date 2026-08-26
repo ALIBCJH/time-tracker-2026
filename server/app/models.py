@@ -127,6 +127,13 @@ class UserSettings(Base):
     catch_all_stream: Mapped[str] = mapped_column(String(64), nullable=False,
                                                   default='Deep Research')
     private_labels: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # Set by the tracked person to stop everything for a while. NULL means
+    # not paused. A far-future value is an indefinite pause. The agent reads
+    # this and stops; nothing here relies on the agent being honest, because
+    # anything it does upload while paused is refused.
+    tracking_paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pause_reason: Mapped[str | None] = mapped_column(String(200))
+
     # Extra addresses that receive this person's reports — how an admin gets a
     # copy of a worker's week. A list rather than one field because "the boss
     # and the accountant" is the normal case, not an exception.
@@ -140,6 +147,31 @@ class UserSettings(Base):
         CheckConstraint('prompt_end_hour BETWEEN 1 AND 24', name='ck_settings_prompt_end'),
         CheckConstraint('weekly_send_weekday BETWEEN 0 AND 6', name='ck_settings_weekday'),
         CheckConstraint('idle_threshold_seconds > 0', name='ck_settings_idle'),
+    )
+
+
+class Consent(Base):
+    """A record that someone was told what is collected, and agreed.
+
+    Kept as an append-only log rather than a flag on the user, because the
+    question that gets asked later is "what were they told, and when" — and a
+    boolean cannot answer it. A new policy version means a new row, so changing
+    what is collected requires asking again rather than silently inheriting an
+    agreement to something else.
+    """
+    __tablename__ = 'consents'
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    accepted_at: Mapped[datetime] = _created_at()
+    # Evidence of where the agreement came from, kept short and non-identifying
+    # beyond what a web server logs anyway.
+    source_ip: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'policy_version', name='uq_consent_user_version'),
     )
 
 
@@ -304,6 +336,24 @@ class ActivityLog(Base):
         CheckConstraint("status IN ('draft', 'confirmed', 'skipped')",
                         name='ck_activity_logs_status'),
     )
+
+
+class RateBucket(Base):
+    """One rate-limit counter per (scope, key, window).
+
+    Defined here with every other model rather than beside the limiter logic:
+    when it lived in app/ratelimit.py, whether the table got created at all
+    depended on whether something had imported that module first. Alembic
+    generated an empty migration, and the test schema included the table or not
+    depending on test order.
+    """
+    __tablename__ = 'rate_buckets'
+
+    scope: Mapped[str] = mapped_column(String(32), primary_key=True)
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                   primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class ReportSend(Base):

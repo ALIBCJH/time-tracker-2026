@@ -75,15 +75,15 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## F. Desktop widget
 
-- [ ] F1  Ring gauge, day + week goals
-- [ ] F2  Overdrive state past 100%
-- [ ] F3  Docked top-centre positioning
-- [ ] F4  Greeting toast on session start
-- [ ] F5  Focus cheers every 25 min of non-idle tracking
-- [ ] F6  Tray menu — show/hide, dock, dashboard, previews, quit
-- [ ] F7  Daily-prompt card
-- [ ] F8  Offline detection
-- [ ] F9  **NEW** Points at a configurable server URL, carries the agent token
+- [x] F1  Ring gauge, day + week goals
+- [x] F2  Overdrive state past 100%
+- [x] F3  Docked top-centre positioning
+- [x] F4  Greeting toast on session start
+- [x] F5  Focus cheers every 25 min of non-idle tracking
+- [x] F6  Tray menu — show/hide, dock, pause, dashboard, quit
+- [~] F7  Daily-prompt card — queue + gating done, card UI pending
+- [x] F8  Offline detection
+- [x] F9  **NEW** Points at a configurable server URL, carries the agent token
 
 ## G. Multi-user platform — all NEW
 

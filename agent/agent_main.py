@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""The agent: capture, spool, upload, and the widget.
+
+One process with a Qt event loop driving everything on timers, rather than the
+local app's several daemon threads. The reason is not elegance — it is that a
+thread that dies takes its job with it silently, and the local app lost its
+input listeners that way more than once. A timer that stops is visible, because
+the face stops moving.
+
+The web dashboard is the source of truth for settings; the laptop is the source
+of truth for what happened on it. Neither waits for the other.
+"""
+import logging
+import os
+import sys
+import webbrowser
+
+logging.basicConfig(level=os.environ.get('LOG_LEVEL', 'INFO'),
+                    format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+logger = logging.getLogger('agent')
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import config
+from client import Client
+from capture import ActivityMonitor
+from platform_x11 import detect_sources
+from screenshot import ScreenshotService, detect_backend
+from settings import RemoteSettings
+from spool import Spool
+from sync import flush_all, flush_screenshots
+from widget.state import WidgetState
+
+POLL_MS = 5_000            # the capture loop
+SYNC_MS = 60_000           # uploading
+SETTINGS_MS = 120_000      # settings and the pause
+PROMPT_MS = 15_000         # the daily card
+
+
+class Controller:
+    """Wires the pieces together and owns the timers."""
+
+    def __init__(self):
+        conf = config.load()
+        self.server = conf['server']
+        self.client = Client(self.server, conf['token'])
+        self.spool = Spool()
+        self.settings = RemoteSettings()
+        self.state = WidgetState(self.spool, self.settings,
+                                 name=os.environ.get('TIMETRACKER_USER_NAME'))
+        self.state.refresh_from_spool()
+
+        idle_source, window_source = detect_sources()
+        self.monitor = ActivityMonitor(
+            self.spool, idle_source, window_source,
+            idle_threshold=self.settings.get('idle_threshold_seconds'),
+            settings=self.settings) if idle_source else None
+        if self.monitor is None:
+            logger.error('No idle source — time cannot be tracked on this display.')
+
+        shots_dir = os.path.join(self.spool.dir, 'shots')
+        try:
+            backend = detect_backend(shots_dir)
+        except Exception as e:
+            backend = None
+            logger.warning(f'Screen capture unavailable: {e}')
+        self.shots = ScreenshotService(self.spool, shots_dir, self.settings,
+                                       backend=backend)
+        self.widget = None
+
+    # ── Timers ───────────────────────────────────────────────────────────────
+
+    def poll(self):
+        result = self.monitor.tick() if self.monitor else {'is_idle': False}
+        if not result.get('paused'):
+            self.shots.tick(is_idle=result.get('is_idle', False))
+        cheer = self.state.tick(is_idle=result.get('is_idle', False))
+        self.state.refresh_from_spool()
+        if self.widget:
+            self.widget.render_state()
+            if cheer:
+                self.widget.window().setToolTip(cheer['title'])
+                logger.info(f"{cheer['glyph']} {cheer['title']} — {cheer['sub']}")
+
+    def sync(self):
+        result = flush_all(self.spool, self.client)
+        if result['status'] in ('ok', 'idle'):
+            self.state.note_contact()
+        flush_screenshots(self.spool, self.client)
+
+    def refresh_settings(self):
+        if self.settings.refresh(self.client):
+            self.state.note_contact()
+            if self.monitor:
+                self.monitor.idle_threshold = self.settings.get('idle_threshold_seconds')
+
+    def refresh_prompts(self):
+        from client import AuthError, TransientError
+        try:
+            idle = self.monitor.idle_source.idle_seconds() if self.monitor else None
+            body = self.client._request(
+                'GET', f'/api/agent/activity-log/pending?idle_seconds={idle or 0}')
+            self.state.set_prompts(body)
+            self.state.note_contact()
+        except (AuthError, TransientError, Exception) as e:
+            logger.debug(f'Prompts not refreshed: {e}')
+
+    # ── Tray actions ─────────────────────────────────────────────────────────
+
+    def pause(self):
+        """Opens the settings page rather than pausing from here.
+
+        The pause is the user's own control and lives on the server; a local
+        button that only stopped this process would leave someone believing
+        they had stopped something they had not.
+        """
+        webbrowser.open(f'{self.server}/settings')
+
+    def open_dashboard(self):
+        webbrowser.open(self.server)
+
+
+def main():
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication
+
+    from widget.app import Widget, tray_icon
+
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)      # closing the card is not quitting
+
+    controller = Controller()
+    controller.widget = Widget(controller.state, on_sync=controller.sync)
+    controller.widget.show()
+    icon = tray_icon(app, controller.widget, controller.state, controller)
+
+    for interval, job in ((POLL_MS, controller.poll),
+                          (SYNC_MS, controller.sync),
+                          (SETTINGS_MS, controller.refresh_settings),
+                          (PROMPT_MS, controller.refresh_prompts)):
+        timer = QTimer(app)
+        timer.timeout.connect(job)
+        timer.start(interval)
+
+    controller.refresh_settings()
+    controller.poll()
+    logger.info(f'Agent running against {controller.server}')
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()

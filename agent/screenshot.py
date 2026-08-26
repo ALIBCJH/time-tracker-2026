@@ -46,6 +46,10 @@ def _run(argv):
 
 
 def detect_backend(tmp_dir):
+    # Created here, not assumed: on a fresh install this directory does not
+    # exist yet, every probe fails to write, and the agent concludes the
+    # machine has no screenshot tool at all.
+    os.makedirs(tmp_dir, exist_ok=True)
     probe = os.path.join(tmp_dir, '.probe.png')
     for template in BACKENDS:
         argv = [part.format(path=probe) for part in template]

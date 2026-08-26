@@ -154,3 +154,24 @@ def test_captures_survive_a_restart(rig, tmp_path):
     reopened = Spool(str(tmp_path))
     assert reopened.stats()['pending_screenshots'] == 1
     reopened.close()
+
+
+def test_backend_detection_creates_its_own_probe_directory(tmp_path, monkeypatch):
+    """On a fresh install the directory does not exist yet. Without this, every
+    probe fails to write and the agent concludes the machine has no screenshot
+    tool at all — which is what happened the first time it was run enrolled."""
+    import screenshot as S
+
+    calls = []
+
+    def fake_run(argv):
+        calls.append(argv)
+        path = argv[-1]
+        with open(path, 'wb') as f:            # only succeeds if the dir exists
+            f.write(b'x')
+        return True
+    monkeypatch.setattr(S, '_run', fake_run)
+
+    missing = tmp_path / 'does' / 'not' / 'exist'
+    assert S.detect_backend(str(missing)) is not None
+    assert missing.is_dir()

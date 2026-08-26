@@ -13,10 +13,25 @@
       <p class="sub">tracked {{ today.strftime('%A, %d %B') }}
         · {{ subject.settings.timezone }}</p>
     </div>
+    <div>
+    {% if not viewing_other %}
+      <form method="post" action="{{ url_for('dashboard.session_control') }}" class="control">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if status.is_tracking %}
+          <input type="hidden" name="action" value="stop">
+          <button type="submit" class="ghost">Stop session</button>
+        {% else %}
+          <input name="project" placeholder="Project" required
+                 value="Digital Transformation">
+          <button type="submit">Start</button>
+        {% endif %}
+      </form>
+    {% endif %}
     <div id="live" class="pill {{ 'on' if status.is_tracking else '' }}">
       {% if status.is_tracking %}
         <span class="dot"></span> {{ status.project }} · {{ hm(status.elapsed_seconds) }}
       {% else %}Not tracking{% endif %}
+    </div>
     </div>
   </div>
 
@@ -63,6 +78,13 @@
   </p>
 </div>
 
+<style>
+  .control { display:flex; gap:8px; justify-content:flex-end; margin-bottom:10px; }
+  .control input { width:auto; padding:8px 11px; font-size:14px; }
+  .control button { padding:8px 14px; font-size:14px; }
+  .control .ghost { background:transparent; color:var(--ink2);
+                    border:1px solid var(--line); }
+</style>
 <script>
   // Poll only the small status endpoint; the aggregate above is a page load.
   async function tick() {

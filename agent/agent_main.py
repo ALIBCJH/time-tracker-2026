@@ -90,10 +90,19 @@ class Controller:
         flush_screenshots(self.spool, self.client)
 
     def refresh_settings(self):
-        if self.settings.refresh(self.client):
-            self.state.note_contact()
-            if self.monitor:
-                self.monitor.idle_threshold = self.settings.get('idle_threshold_seconds')
+        from settings import reconcile_session
+        if not self.settings.refresh(self.client):
+            return
+        self.state.note_contact()
+        if self.monitor:
+            self.monitor.idle_threshold = self.settings.get('idle_threshold_seconds')
+
+        outcome = reconcile_session(self.spool, self.settings.server_session)
+        if outcome not in ('agreed', 'pending-upload'):
+            logger.info(f'Session reconciled with the server: {outcome}')
+            self.state.refresh_from_spool()
+            if self.widget:
+                self.widget.render_state()
 
     def refresh_prompts(self):
         from client import AuthError, TransientError

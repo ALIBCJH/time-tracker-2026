@@ -124,6 +124,20 @@ class Spool:
             (cu, project, task, started_at or now_iso(), now_iso()))
         return cu
 
+    def adopt_session(self, server_session):
+        """Take on a session the server already has — one started from the
+        dashboard. Inserted CLEAN, because uploading it back would be telling
+        the server something it just told us.
+        """
+        self.conn.execute(
+            'INSERT OR IGNORE INTO sessions (client_uuid, project, task, '
+            'started_at, last_heartbeat_at, dirty, synced_at) '
+            'VALUES (?,?,?,?,?,0,?)',
+            (server_session['client_uuid'], server_session.get('project', ''),
+             server_session.get('task') or '', server_session['started_at'],
+             now_iso(), now_iso()))
+        return server_session['client_uuid']
+
     def stop_session(self, client_uuid, ended_at=None):
         self.conn.execute(
             'UPDATE sessions SET ended_at=?, dirty=1, synced_at=NULL '

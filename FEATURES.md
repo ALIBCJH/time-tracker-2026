@@ -41,7 +41,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] C3  Weekly summary view
 - [x] C4  Screenshot gallery by date
 - [x] C5  Session history page
-- [ ] C6  Start/stop controls
+- [x] C6  Start/stop controls (browser and widget, reconciled)
 
 ## D. Daily activity log
 
@@ -112,3 +112,15 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] H9  Backups + a *tested* restore
 - [x] H10 Health checks (liveness + readiness) and structured logs
 - [x] H11 Rate limiting on login and ingest
+
+---
+
+All 78 done. What is deliberately NOT here, and why:
+
+- **No self-service password reset form.** An unauthenticated way to make the
+  domain send mail to any address someone types buys nothing behind a private,
+  three-person deployment. An administrator issues links.
+- **No public sign-up.** Open registration on a server holding screen captures
+  is a liability nobody asked for.
+- **No admin control over anyone's pause.** A switch someone else can flip is
+  not a control.

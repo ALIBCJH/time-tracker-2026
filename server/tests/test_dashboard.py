@@ -147,3 +147,88 @@ def test_an_anonymous_visitor_to_the_admin_page_is_sent_to_login(client):
     before anyone has signed in. The 404 rule is for signed-in workers."""
     r = client.get('/admin/team')
     assert r.status_code == 302 and '/login' in r.headers['Location']
+
+
+# ── Starting and stopping from the browser ───────────────────────────────────
+
+def test_you_can_start_a_session_from_the_dashboard(client, db, worker, password):
+    from app.models import Session
+    sign_in(client, 'worker@example.com', password)
+    client.post('/session', data={'project': 'From the browser'})
+    row = db.query(Session).filter(Session.ended_at.is_(None)).one()
+    assert row.project == 'From the browser' and row.user_id == worker.id
+
+
+def test_you_can_stop_one(client, db, worker, password):
+    from app.models import Session
+    sign_in(client, 'worker@example.com', password)
+    client.post('/session', data={'project': 'Alpha'})
+    client.post('/session', data={'action': 'stop'})
+    assert db.query(Session).filter(Session.ended_at.is_(None)).count() == 0
+
+
+def test_a_nameless_project_is_refused(client, db, worker, password):
+    from app.models import Session
+    sign_in(client, 'worker@example.com', password)
+    client.post('/session', data={'project': '   '})
+    assert db.query(Session).count() == 0
+
+
+def test_starting_twice_does_not_open_two(client, db, worker, password):
+    from app.models import Session
+    sign_in(client, 'worker@example.com', password)
+    client.post('/session', data={'project': 'Alpha'})
+    client.post('/session', data={'project': 'Beta'})
+    assert db.query(Session).filter(Session.ended_at.is_(None)).count() == 1
+
+
+def test_a_paused_person_cannot_start_one(client, db, worker, password):
+    from app.models import Session
+    from app.services import consent as C
+    C.pause_indefinitely(db, worker)
+    sign_in(client, 'worker@example.com', password)
+    client.post('/session', data={'project': 'Alpha'})
+    assert db.query(Session).count() == 0
+
+
+def test_an_admin_cannot_start_a_session_for_someone_else(
+        client, db, worker, boss, password):
+    """Recording time on somebody's behalf is a different thing entirely from
+    looking at what they recorded."""
+    from app.models import Session
+    sign_in(client, 'boss@example.com', password)
+    client.post('/session', data={'project': 'Alpha', 'user': str(worker.id)})
+    row = db.query(Session).filter(Session.ended_at.is_(None)).one()
+    assert row.user_id == boss.id
+
+
+def test_an_admin_cannot_stop_someone_elses(client, db, worker, boss, password):
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    from app.models import Session
+    db.add(Session(user_id=worker.id, client_uuid=_uuid.uuid4(), project='Theirs',
+                   started_at=_dt.now(UTC)))
+    db.commit()
+    sign_in(client, 'boss@example.com', password)
+    client.post('/session', data={'action': 'stop', 'user': str(worker.id)})
+    assert db.query(Session).filter(Session.ended_at.is_(None)).count() == 1
+
+
+def test_the_agent_is_told_what_the_server_thinks_is_running(client, db, worker):
+    """The whole reason a browser button can exist: the agent reconciles."""
+    from app.services.users import issue_device_token
+    sign_in(client, 'worker@example.com', 'a-perfectly-fine-password')
+    client.post('/session', data={'project': 'From the browser'})
+
+    _, token = issue_device_token(db, worker, 'laptop')
+    body = client.get('/api/agent/me',
+                      headers={'Authorization': f'Bearer {token}'}).get_json()
+    assert body['server_session']['project'] == 'From the browser'
+
+
+def test_the_agent_is_told_when_nothing_is_running(client, db, worker):
+    from app.services.users import issue_device_token
+    _, token = issue_device_token(db, worker, 'laptop')
+    body = client.get('/api/agent/me',
+                      headers={'Authorization': f'Bearer {token}'}).get_json()
+    assert body['server_session'] is None

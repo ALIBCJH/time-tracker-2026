@@ -361,3 +361,63 @@ def _streams(text):
         if name.strip() and parts:
             streams.append([name.strip()[:64], parts])
     return streams
+
+
+@bp.post('/session')
+@login_required
+def session_control():
+    """Start or stop your own session from the browser.
+
+    Your own only — there is no ?user= here. An admin starting or stopping
+    somebody else's tracking would be recording time on their behalf, which is
+    a different thing entirely from watching what they recorded.
+
+    The agent reconciles on its next poll: it adopts a session started here and
+    closes one stopped here. That is the whole reason this can exist at all —
+    without it a browser button would create a session no agent is feeding,
+    which records time with nothing to attribute it to.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Session
+    from app.services.consent import is_paused
+
+    if is_paused(current_user):
+        flash('Tracking is paused. Resume it first.', 'error')
+        return redirect(url_for('dashboard.index'))
+
+    now = datetime.now(timezone.utc)
+    open_session = (db_session.query(Session)
+                    .filter(Session.user_id == current_user.id,
+                            Session.ended_at.is_(None)).one_or_none())
+
+    if request.form.get('action') == 'stop':
+        if open_session is not None:
+            open_session.ended_at = now
+            db_session.commit()
+            flash('Session stopped.', 'ok')
+        return redirect(url_for('dashboard.index'))
+
+    if open_session is not None:
+        flash('A session is already running.', 'error')
+        return redirect(url_for('dashboard.index'))
+
+    project = (request.form.get('project') or '').strip()[:120]
+    if not project:
+        flash('Name the project first.', 'error')
+        return redirect(url_for('dashboard.index'))
+
+    db_session.add(Session(user_id=current_user.id, client_uuid=_uuid.uuid4(),
+                           project=project,
+                           task=(request.form.get('task') or '').strip()[:2000],
+                           started_at=now, last_heartbeat_at=now))
+    try:
+        db_session.commit()
+    except IntegrityError:
+        # The agent opened one in the same instant. Its session is the real
+        # one — it is the thing actually watching the screen.
+        db_session.rollback()
+        flash('Your agent just started one.', 'ok')
+    return redirect(url_for('dashboard.index'))

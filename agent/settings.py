@@ -40,6 +40,7 @@ class RemoteSettings:
         self._values.update(values or {})
         self.paused = False
         self.paused_until = None
+        self.server_session = None
         self.last_error = None
 
     def get(self, key, default=None):
@@ -61,6 +62,7 @@ class RemoteSettings:
             logger.debug(f'Settings not refreshed: {e}')
             return False
 
+        self.server_session = body.get('server_session')
         self._values.update(body.get('settings') or {})
         was_paused = self.paused
         self.paused = bool(body.get('paused'))
@@ -72,3 +74,45 @@ class RemoteSettings:
         elif was_paused and not self.paused:
             logger.info('Tracking resumed by the user')
         return True
+
+
+def reconcile_session(spool, server_session):
+    """Make the laptop agree with the server about what is running.
+
+    Someone can start or stop a session from the dashboard — from another room,
+    or after leaving the laptop running at the office — so the two views have to
+    be reconciled rather than assumed identical.
+
+    The rule is: the server wins, EXCEPT for a local session it has not seen
+    yet. A session started offline is still pending upload, and treating the
+    server's silence about it as "stopped" would delete work the moment it was
+    started on a train.
+
+    Returns what happened, for logs and tests.
+    """
+    local = spool.open_session()
+    remote_uuid = (server_session or {}).get('client_uuid')
+
+    if local is None:
+        if remote_uuid:
+            # Started from the browser. Adopt it, so what happens on screen
+            # from now on is attributed to it.
+            spool.adopt_session(server_session)
+            return 'adopted'
+        return 'agreed'
+
+    if remote_uuid == local['client_uuid']:
+        return 'agreed'
+
+    if local['dirty'] or local['synced_at'] is None:
+        # The server has never acknowledged this one. It is not stale, it is
+        # merely unsent.
+        return 'pending-upload'
+
+    # The server has seen this session and no longer considers it open: it was
+    # stopped elsewhere.
+    spool.stop_session(local['client_uuid'])
+    if remote_uuid:
+        spool.adopt_session(server_session)
+        return 'replaced'
+    return 'stopped-remotely'

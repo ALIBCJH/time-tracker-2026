@@ -35,11 +35,25 @@ def heartbeat():
 def me():
     """What the agent needs to configure itself — all of it per-user, none of
     it baked into the agent build."""
+    from app.models import Session
     from app.services.consent import is_paused
 
     s = g.agent_user.settings
     paused = is_paused(g.agent_user)
+
+    # The server's view of what is running. The agent compares this against its
+    # own spool and reconciles, which is what lets someone stop a session from
+    # a browser when the laptop is in another room.
+    open_session = (db_session.query(Session)
+                    .filter(Session.user_id == g.agent_user.id,
+                            Session.ended_at.is_(None)).one_or_none())
     return jsonify({
+        'server_session': None if open_session is None else {
+            'client_uuid': str(open_session.client_uuid),
+            'project': open_session.project,
+            'task': open_session.task,
+            'started_at': open_session.started_at.isoformat(),
+        },
         'user': {'email': g.agent_user.email, 'name': g.agent_user.name},
         'paused': paused,
         'paused_until': s.tracking_paused_until.isoformat() if paused else None,

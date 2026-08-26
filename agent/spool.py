@@ -1,0 +1,244 @@
+"""The agent's local queue.
+
+Everything the agent records is written here first and uploaded second. That
+ordering is the whole design: the laptop is the source of truth until the server
+has acknowledged a record, so a dropped connection, a closed lid, or a server
+that is down for a day costs nothing.
+
+Stdlib only, on purpose — the agent runs on other people's machines and every
+dependency is something that can fail to install there.
+
+Two lifecycles, because two kinds of record behave differently:
+
+  * app usage and idle periods are FINISHED when recorded. They are uploaded
+    once and then pruned.
+  * a session CHANGES after it is recorded — it opens, runs, and later closes.
+    So it is marked dirty on every change and re-uploaded until the server has
+    the latest version. It is never pruned while it is still open.
+"""
+import json
+import os
+import sqlite3
+import uuid
+from datetime import datetime, timedelta, timezone
+
+DEFAULT_DIR = os.path.expanduser('~/.timetracker-agent')
+
+# How long an uploaded record is kept before pruning. Not zero: keeping a few
+# days means a server-side restore can be replayed from the laptops.
+KEEP_SYNCED_DAYS = 7
+
+# A record the server has refused this many times is not going to be accepted.
+# Retrying it for ever would block nothing (the spool uploads around it) but
+# would grow without bound and hide the problem.
+MAX_ATTEMPTS = 5
+
+SCHEMA = '''
+CREATE TABLE IF NOT EXISTS sessions (
+    client_uuid       TEXT PRIMARY KEY,
+    project           TEXT NOT NULL,
+    task              TEXT NOT NULL DEFAULT '',
+    started_at        TEXT NOT NULL,
+    ended_at          TEXT,
+    last_heartbeat_at TEXT,
+    dirty             INTEGER NOT NULL DEFAULT 1,
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    dead              INTEGER NOT NULL DEFAULT 0,
+    synced_at         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS app_usage (
+    client_uuid         TEXT PRIMARY KEY,
+    session_client_uuid TEXT,
+    app_name            TEXT NOT NULL,
+    window_title        TEXT NOT NULL DEFAULT '',
+    started_at          TEXT NOT NULL,
+    ended_at            TEXT NOT NULL,
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    dead                INTEGER NOT NULL DEFAULT 0,
+    synced_at           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS idle_periods (
+    client_uuid TEXT PRIMARY KEY,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    dead        INTEGER NOT NULL DEFAULT 0,
+    synced_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_sessions_pending ON sessions(dirty, dead);
+CREATE INDEX IF NOT EXISTS ix_usage_pending    ON app_usage(synced_at, dead);
+CREATE INDEX IF NOT EXISTS ix_idle_pending     ON idle_periods(synced_at, dead);
+'''
+
+_FINISHED = ('app_usage', 'idle_periods')
+
+
+def now_iso():
+    """Always with an offset. The server refuses a naive timestamp, and it is
+    right to — a timestamp without a zone is a guess about which day it was."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+class Spool:
+    def __init__(self, path=None):
+        self.dir = path or DEFAULT_DIR
+        os.makedirs(self.dir, exist_ok=True)
+        self.path = os.path.join(self.dir, 'spool.db')
+        self.conn = sqlite3.connect(self.path, isolation_level=None)
+        self.conn.row_factory = sqlite3.Row
+        # WAL so a read while the uploader is writing doesn't block the tracker.
+        self.conn.execute('PRAGMA journal_mode=WAL')
+        self.conn.executescript(SCHEMA)
+
+    def close(self):
+        self.conn.close()
+
+    # ── Recording ────────────────────────────────────────────────────────────
+
+    def start_session(self, project, task='', started_at=None):
+        """Open a session locally. Returns its client_uuid.
+
+        No server round trip: the widget must be able to start tracking on a
+        train. Whether the server has heard about it yet is the uploader's
+        problem, not the user's.
+        """
+        cu = str(uuid.uuid4())
+        self.conn.execute(
+            'INSERT INTO sessions (client_uuid, project, task, started_at, '
+            'last_heartbeat_at) VALUES (?,?,?,?,?)',
+            (cu, project, task, started_at or now_iso(), now_iso()))
+        return cu
+
+    def stop_session(self, client_uuid, ended_at=None):
+        self.conn.execute(
+            'UPDATE sessions SET ended_at=?, dirty=1, synced_at=NULL '
+            'WHERE client_uuid=? AND ended_at IS NULL',
+            (ended_at or now_iso(), client_uuid))
+
+    def heartbeat(self, client_uuid, at=None):
+        """Mark the open session alive. This is what the server caps an
+        abandoned session at when the agent dies mid-session."""
+        self.conn.execute(
+            'UPDATE sessions SET last_heartbeat_at=?, dirty=1 '
+            'WHERE client_uuid=? AND ended_at IS NULL', (at or now_iso(), client_uuid))
+
+    def open_session(self):
+        row = self.conn.execute(
+            'SELECT * FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC'
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_app_usage(self, app_name, window_title, started_at, ended_at,
+                         session_client_uuid=None):
+        cu = str(uuid.uuid4())
+        self.conn.execute(
+            'INSERT INTO app_usage (client_uuid, session_client_uuid, app_name, '
+            'window_title, started_at, ended_at) VALUES (?,?,?,?,?,?)',
+            (cu, session_client_uuid, app_name, window_title, started_at, ended_at))
+        return cu
+
+    def record_idle(self, started_at, ended_at):
+        cu = str(uuid.uuid4())
+        self.conn.execute(
+            'INSERT INTO idle_periods (client_uuid, started_at, ended_at) VALUES (?,?,?)',
+            (cu, started_at, ended_at))
+        return cu
+
+    # ── Uploading ────────────────────────────────────────────────────────────
+
+    def pending_batch(self, limit=500):
+        """The next batch to upload, oldest first.
+
+        Sessions come out whenever they are dirty, not only when new: an open
+        session is re-sent as it changes, and the server's upsert makes each
+        resend a no-op or an update rather than a duplicate.
+        """
+        batch = {'sessions': [], 'app_usage': [], 'idle_periods': []}
+
+        for r in self.conn.execute(
+                'SELECT * FROM sessions WHERE dirty=1 AND dead=0 '
+                'ORDER BY started_at LIMIT ?', (limit,)):
+            batch['sessions'].append({
+                'client_uuid': r['client_uuid'], 'project': r['project'],
+                'task': r['task'], 'started_at': r['started_at'],
+                'ended_at': r['ended_at'], 'last_heartbeat_at': r['last_heartbeat_at']})
+
+        for r in self.conn.execute(
+                'SELECT * FROM app_usage WHERE synced_at IS NULL AND dead=0 '
+                'ORDER BY started_at LIMIT ?', (limit,)):
+            batch['app_usage'].append({
+                'client_uuid': r['client_uuid'],
+                'session_client_uuid': r['session_client_uuid'],
+                'app_name': r['app_name'], 'window_title': r['window_title'],
+                'started_at': r['started_at'], 'ended_at': r['ended_at']})
+
+        for r in self.conn.execute(
+                'SELECT * FROM idle_periods WHERE synced_at IS NULL AND dead=0 '
+                'ORDER BY started_at LIMIT ?', (limit,)):
+            batch['idle_periods'].append({
+                'client_uuid': r['client_uuid'], 'started_at': r['started_at'],
+                'ended_at': r['ended_at']})
+
+        return batch
+
+    def mark_accepted(self, batch, rejected=()):
+        """Settle a batch against the server's answer.
+
+        Only records the server did NOT reject are marked synced. A rejected
+        record has its attempt counted and is retried, up to MAX_ATTEMPTS —
+        after which it is marked dead and stops consuming bandwidth for ever.
+        Nothing is deleted here: pruning is a separate, later decision.
+        """
+        bad = {(r.get('kind'), r.get('index')) for r in rejected}
+        stamp = now_iso()
+
+        for kind, records in batch.items():
+            for i, record in enumerate(records):
+                cu = record['client_uuid']
+                if (kind, i) in bad or (kind, None) in bad:
+                    self.conn.execute(
+                        f'UPDATE {kind} SET attempts = attempts + 1, '
+                        f'dead = CASE WHEN attempts + 1 >= ? THEN 1 ELSE 0 END '
+                        f'WHERE client_uuid = ?', (MAX_ATTEMPTS, cu))
+                elif kind == 'sessions':
+                    # Clean only if it still looks the way we sent it: a session
+                    # that changed mid-upload must stay dirty, or that change is
+                    # lost.
+                    self.conn.execute(
+                        'UPDATE sessions SET dirty=0, attempts=0, synced_at=? '
+                        'WHERE client_uuid=? AND IFNULL(ended_at, "") = IFNULL(?, "") '
+                        'AND IFNULL(last_heartbeat_at, "") = IFNULL(?, "")',
+                        (stamp, cu, record.get('ended_at'), record.get('last_heartbeat_at')))
+                else:
+                    self.conn.execute(
+                        f'UPDATE {kind} SET synced_at=?, attempts=0 WHERE client_uuid=?',
+                        (stamp, cu))
+
+    def prune(self, keep_days=KEEP_SYNCED_DAYS):
+        """Drop uploaded records older than the keep window. Open sessions are
+        never pruned however old — an open session is still live state."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+        removed = 0
+        for table in _FINISHED:
+            cur = self.conn.execute(
+                f'DELETE FROM {table} WHERE synced_at IS NOT NULL AND synced_at < ?',
+                (cutoff,))
+            removed += cur.rowcount
+        cur = self.conn.execute(
+            'DELETE FROM sessions WHERE ended_at IS NOT NULL AND dirty=0 '
+            'AND synced_at IS NOT NULL AND synced_at < ?', (cutoff,))
+        return removed + cur.rowcount
+
+    def stats(self):
+        def count(table, where):
+            return self.conn.execute(f'SELECT COUNT(*) c FROM {table} WHERE {where}'
+                                     ).fetchone()['c']
+        return {
+            'pending_sessions': count('sessions', 'dirty=1 AND dead=0'),
+            'pending_app_usage': count('app_usage', 'synced_at IS NULL AND dead=0'),
+            'pending_idle': count('idle_periods', 'synced_at IS NULL AND dead=0'),
+            'dead': sum(count(t, 'dead=1') for t in ('sessions',) + _FINISHED),
+        }

@@ -171,6 +171,12 @@ class Session(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    # Minted by the agent before the row ever leaves the laptop. Uploads are
+    # idempotent on it, which is the whole reason an agent can retry a batch
+    # after a dropped connection without inventing duplicate work.
+    client_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
+
     project: Mapped[str] = mapped_column(String(120), nullable=False)
     task: Mapped[str] = mapped_column(Text, nullable=False, default='')
 
@@ -186,6 +192,7 @@ class Session(Base):
         Index('uq_sessions_one_open_per_user', 'user_id',
               unique=True, postgresql_where=text('ended_at IS NULL')),
         Index('ix_sessions_user_started', 'user_id', 'started_at'),
+        UniqueConstraint('user_id', 'client_uuid', name='uq_sessions_client_uuid'),
         CheckConstraint('ended_at IS NULL OR ended_at >= started_at',
                         name='ck_sessions_order'),
     )
@@ -199,6 +206,8 @@ class AppUsage(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    client_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
     session_id: Mapped[int | None] = mapped_column(
         ForeignKey('sessions.id', ondelete='SET NULL'))
     app_name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -207,7 +216,10 @@ class AppUsage(Base):
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    __table_args__ = (Index('ix_app_usage_user_started', 'user_id', 'started_at'),)
+    __table_args__ = (
+        Index('ix_app_usage_user_started', 'user_id', 'started_at'),
+        UniqueConstraint('user_id', 'client_uuid', name='uq_app_usage_client_uuid'),
+    )
 
 
 class IdlePeriod(Base):
@@ -216,11 +228,16 @@ class IdlePeriod(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    client_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    __table_args__ = (Index('ix_idle_user_started', 'user_id', 'started_at'),)
+    __table_args__ = (
+        Index('ix_idle_user_started', 'user_id', 'started_at'),
+        UniqueConstraint('user_id', 'client_uuid', name='uq_idle_client_uuid'),
+    )
 
 
 class Screenshot(Base):

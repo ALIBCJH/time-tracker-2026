@@ -15,19 +15,19 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] A1  Active window + app detection (X11 `xdotool`; from `activity.py`)
 - [ ] A2  Idle detection via X11 screensaver counter, 10-min session cutoff
 - [ ] A3  Suspend/freeze detection (loop-gap heuristic)
-- [ ] A4  App-usage logging (`app_usage` rows — feeds the whole activity log)
-- [ ] A5  Idle-period logging
+- [~] A4  App-usage logging — server ingest done, X11 capture pending
+- [~] A5  Idle-period logging — server ingest done, X11 capture pending
 - [ ] A6  Screenshot capture, gated on "session active AND not idle AND enabled"
 - [ ] A7  Thumbnail generation
 - [ ] A8  Capture sound notification
-- [ ] A9  **NEW** Local spool + batched upload, survives a dropped connection
-- [ ] A10 **NEW** Per-device agent token, rotatable
+- [x] A9  **NEW** Local spool + batched upload, survives a dropped connection
+- [x] A10 **NEW** Per-device agent token, rotatable
 - [ ] A11 **NEW** WebP encoding before upload (~5× smaller than PNG)
 
 ## B. Sessions & core data
 
-- [ ] B1  Start/stop session with project + task
-- [ ] B2  Active-session state
+- [x] B1  Start/stop session with project + task
+- [x] B2  Active-session state
 - [ ] B3  Orphaned-session recovery, capped at last-known activity
 - [ ] B4  Short-gap auto-resume (≤5 min downtime = crash, not absence)
 - [x] B5  Race-safe start — now a partial unique index, not a Python dance

@@ -1,0 +1,24 @@
+# Development stack. Production adds the web + worker services alongside this;
+# Postgres stays the same image so dev and prod don't drift on version.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ttcloud-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ttcloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devonly}
+      POSTGRES_DB: ttcloud
+    ports:
+      # 5432/5433/5455 are already taken on this machine by other projects.
+      - "5460:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ttcloud -d ttcloud"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

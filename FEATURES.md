@@ -30,7 +30,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] B2  Active-session state
 - [ ] B3  Orphaned-session recovery, capped at last-known activity
 - [ ] B4  Short-gap auto-resume (≤5 min downtime = crash, not absence)
-- [ ] B5  Race-safe start (`BEGIN IMMEDIATE` + close-all-active)
+- [x] B5  Race-safe start — now a partial unique index, not a Python dance
 - [ ] B6  Logical day/week boundaries (`WEEK_CUTOFF_HOUR`)
 - [ ] B7  Session history
 
@@ -69,7 +69,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] E12 Days-described line
 - [ ] E13 Email previews for both reports
 - [ ] E14 Manual send endpoints (recipient override for samples)
-- [ ] E15 Send-once guards — **per user, in the DB, not a JSON file**
+- [x] E15 Send-once guards — per user, a DB constraint, not a JSON file
 - [ ] E16 One-off catch-up window for schedule changes
 - [ ] E17 **NEW** "No history is not a missed send" guard on every trigger
 
@@ -91,7 +91,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [ ] G2  Password reset
 - [ ] G3  Roles: worker vs admin
 - [ ] G4  Per-device agent tokens
-- [ ] G5  `user_id` on every table; every query filtered
+- [x] G5  `user_id` on every table; every query filtered
 - [ ] G6  Admin: team overview
 - [ ] G7  Admin: per-person drill-down
 - [ ] G8  Per-user settings — timezone, goals, idle threshold, prompt hours,
@@ -101,10 +101,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## H. Infrastructure — all NEW
 
-- [ ] H1  Postgres + Alembic migrations
+- [x] H1  Postgres + Alembic migrations
 - [ ] H2  Gunicorn + Nginx + TLS + domain
 - [ ] H3  Background worker OUT of the web process (4 workers = 4 emails)
-- [ ] H4  Timezone-aware datetimes throughout
+- [x] H4  Timezone-aware datetimes throughout
 - [ ] H5  S3 screenshot storage, private bucket, presigned URLs
 - [ ] H6  S3 lifecycle — full-res 30 days, thumbnails 1 year
 - [ ] H7  Secrets via environment, never on disk

@@ -161,7 +161,13 @@ DEPLOY_PATH=/opt/timetracker /opt/timetracker/deploy/run-backup.sh
 You want to see `Verified: N user(s), M session(s).` A dump that restores with
 no users is deleted and the run fails loudly, which is the whole point.
 
-Dumps land in `/var/backups/ttcloud` and are kept 14 days (`KEEP_DAYS`). They
-live on the same instance as the database, so set `BACKUP_S3_URI` in the
-instance's `.env` to also copy each one to S3 — otherwise losing the instance
-loses the backups with it.
+Dumps land in `/var/backups/ttcloud` and are kept 14 days (`KEEP_DAYS`).
+
+**Set `BACKUP_S3_URI`.** Without it the backups sit on the same disk as the
+database they protect, so the one failure a backup exists for — losing the
+instance — takes them too. The copy happens from the host after the dump has
+been verified, so a dump that failed to restore is never uploaded.
+
+If it is set and the aws CLI is missing, the run fails loudly rather than
+quietly leaving the backups where they are. The instance needs
+`s3:PutObject` on that prefix.

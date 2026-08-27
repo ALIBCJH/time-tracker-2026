@@ -28,6 +28,16 @@ else
   echo "already installed"
 fi
 
+say "Installing the AWS CLI"
+if command -v aws >/dev/null; then
+  echo "already installed"
+else
+  # Needed to copy each night's dump off this instance. A backup that only
+  # exists on the machine it came from does not survive losing that machine,
+  # which is the failure a backup is for.
+  sudo apt-get update -qq && sudo apt-get install -y -qq awscli
+fi
+
 say "Creating $DEPLOY_PATH"
 sudo mkdir -p "$DEPLOY_PATH"
 sudo chown -R "$USER:$USER" "$DEPLOY_PATH"
@@ -73,6 +83,12 @@ SESSION_IDLE_HOURS=12
 # Where nightly dumps are kept on this instance. Read by docker-compose.prod.yml
 # to bind-mount into the database container.
 BACKUP_DIR=/var/backups/ttcloud
+
+# And where they are copied afterwards. LEAVE THIS BLANK AND THE BACKUPS DIE
+# WITH THE INSTANCE — they would sit on the same disk as the database they are
+# protecting. Point it at a bucket the instance role can write, e.g.
+# s3://your-bucket/db-backups
+BACKUP_S3_URI=
 ENV
   chmod 600 "$DEPLOY_PATH/.env"
   echo "written with a generated password and secret key"

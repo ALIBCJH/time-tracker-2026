@@ -33,10 +33,10 @@ if [ "$USERS" -lt 1 ]; then
 fi
 echo "Verified: $USERS user(s), $SESSIONS session(s)."
 
-if [ -n "${BACKUP_S3_URI:-}" ]; then
-    aws s3 cp "$DUMP" "$BACKUP_S3_URI/$(basename "$DUMP")"
-    echo "Uploaded to $BACKUP_S3_URI"
-fi
+# Copying the dump off this machine is NOT done here. This script runs inside
+# the database container, which has psql and pg_dump and deliberately nothing
+# else — no aws CLI, and no credentials. run-backup.sh does it from the host,
+# where both exist, once this has written a dump it has already verified.
 
 find "$BACKUP_DIR" -name 'ttcloud-*.dump' -mtime "+$KEEP_DAYS" -delete
 echo "Done. Kept $(find "$BACKUP_DIR" -name 'ttcloud-*.dump' | wc -l) local backup(s)."

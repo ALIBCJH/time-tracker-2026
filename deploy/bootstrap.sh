@@ -65,21 +65,36 @@ SMTP_PASSWORD=
 MAIL_FROM=
 
 DEFAULT_TIMEZONE=Africa/Nairobi
+
+# Where nightly dumps are kept on this instance. Read by docker-compose.prod.yml
+# to bind-mount into the database container.
+BACKUP_DIR=/var/backups/ttcloud
 ENV
   chmod 600 "$DEPLOY_PATH/.env"
   echo "written with a generated password and secret key"
 fi
 
 say "Nightly backup"
+# Bind-mounted into the database container as /backups. The dumps are written
+# by root inside that container, which is why no ownership dance is needed
+# here beyond the directory existing.
 sudo mkdir -p "$BACKUP_DIR"
-sudo chown -R "$USER:$USER" "$BACKUP_DIR"
-CRON="15 2 * * * cd $DEPLOY_PATH && docker compose -f docker-compose.prod.yml exec -T db sh -c 'BACKUP_DIR=/backups /backup.sh' >> /var/log/ttcloud-backup.log 2>&1"
-if crontab -l 2>/dev/null | grep -q ttcloud-backup; then
+sudo chown "$USER:$USER" "$BACKUP_DIR"
+sudo touch /var/log/ttcloud-backup.log
+sudo chown "$USER:$USER" /var/log/ttcloud-backup.log
+
+# The wrapper runs backup.sh inside the db container, which is the only place
+# with a local socket, pg_dump, and the privileges to create the scratch
+# database the dump is restored into to prove it is good.
+CRON="15 2 * * * DEPLOY_PATH=$DEPLOY_PATH BACKUP_DIR=$BACKUP_DIR $DEPLOY_PATH/deploy/run-backup.sh >> /var/log/ttcloud-backup.log 2>&1"
+if crontab -l 2>/dev/null | grep -q run-backup.sh; then
   echo "already scheduled"
 else
   ( crontab -l 2>/dev/null || true; echo "$CRON" ) | crontab -
-  echo "scheduled for 02:15 daily"
+  echo "scheduled for 02:15 daily, logging to /var/log/ttcloud-backup.log"
 fi
+echo "Verify it once by hand after the first deploy:"
+echo "  DEPLOY_PATH=$DEPLOY_PATH $DEPLOY_PATH/deploy/run-backup.sh"
 
 say "Done. Before the first deploy:"
 cat <<NEXT

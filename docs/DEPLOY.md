@@ -137,3 +137,31 @@ docker compose -f docker-compose.prod.yml exec web flask --app app issue-token
 `create-user` prompts for email, name, role and password. `issue-token` prints
 a device token for one machine — that is what the agent authenticates with, and
 it is shown once.
+
+Then, on each tracked machine, `agent/install.sh` — it checks the machine,
+installs a systemd user service, and asks for that token. See `agent/README.md`.
+
+## 8. Backups
+
+A dump is taken nightly at 02:15 and **verified by restoring it** into a
+scratch database and counting the rows before it is kept. A backup nobody has
+restored is a hope, not a backup.
+
+It runs inside the database container, which is the only place with a local
+socket, `pg_dump`, and the privileges to create that scratch database. The
+crontab calls `deploy/run-backup.sh`, which is a wrapper so that line stays
+readable.
+
+Run it once by hand after the first deploy, and read the output:
+
+```bash
+DEPLOY_PATH=/opt/timetracker /opt/timetracker/deploy/run-backup.sh
+```
+
+You want to see `Verified: N user(s), M session(s).` A dump that restores with
+no users is deleted and the run fails loudly, which is the whole point.
+
+Dumps land in `/var/backups/ttcloud` and are kept 14 days (`KEEP_DAYS`). They
+live on the same instance as the database, so set `BACKUP_S3_URI` in the
+instance's `.env` to also copy each one to S3 — otherwise losing the instance
+loses the backups with it.

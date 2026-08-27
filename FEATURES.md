@@ -116,6 +116,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] H13 Deploy action — tests, ship, rebuild, and prove the site answers
 - [x] H14 Rollback by re-running the action at an earlier commit
 - [x] H15 One-time host bootstrap, and a deploy runbook
+- [x] H16 Nightly backup wired to actually run, and proven end to end
+- [x] H17 Agent installs as a systemd user service — tracking survives a reboot
+- [x] H18 The installer refuses Wayland rather than tracking nothing silently
 
 ## I. Knowing the tracking itself broke — all NEW
 
@@ -172,7 +175,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
-All 123 done. What is deliberately NOT here, and why:
+All 126 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

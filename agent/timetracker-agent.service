@@ -1,0 +1,45 @@
+# A USER service, not a system one, and that is the whole design.
+#
+# The agent needs the graphical session it is watching: the idle counter, the
+# focused window and the screen capture all come from the X display, and the
+# tray icon and widget have to appear on somebody's desktop. A system service
+# starting at boot has no display to attach to and would fail on every boot.
+#
+# So it is bound to the graphical session. It starts when you log in, stops
+# when you log out, and restarts on its own if it crashes.
+#
+# Installed by agent/install.sh, which fills in the paths.
+
+[Unit]
+Description=TimeTracker agent
+Documentation=https://github.com/ALIBCJH/time-tracker-2026
+PartOf=graphical-session.target
+After=graphical-session.target
+
+# These belong in [Unit], not [Service]. systemd silently IGNORES them under
+# [Service] — a genuinely broken install would then retry for ever and fill the
+# journal instead of giving up and staying failed where somebody sees it.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=__AGENT_DIR__
+ExecStart=__AGENT_DIR__/.venv/bin/python __AGENT_DIR__/agent_main.py
+
+# Always, not on-failure: the point is that tracking survives a crash without
+# anybody noticing it happened. Ten seconds so a persistent failure does not
+# spin; the start limit in [Unit] stops a broken install retrying for ever.
+Restart=always
+RestartSec=10
+
+# The spool is a SQLite file the agent must own; nothing else here writes to
+# the home directory.
+Environment=PYTHONUNBUFFERED=1
+
+# Logs go to the journal: journalctl --user -u timetracker-agent -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target

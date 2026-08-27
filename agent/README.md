@@ -6,16 +6,48 @@ connection costs nothing.
 
 ## Install
 
-    python3 -m venv .venv
-    .venv/bin/pip install PyQt6 Pillow
+    ./install.sh
 
-Nothing else. Everything but the widget and the image encoder is standard
-library, because every dependency is one more thing that can fail to install on
-somebody else's machine.
+Run it as the person being tracked, from inside a desktop session, without
+sudo. It checks the machine, installs the dependencies, asks for the server and
+device token, and installs a systemd user service so tracking survives a reboot
+without anybody remembering to start it.
 
-Needs `xdotool` for window titles and one of `scrot`, `import`,
-`gnome-screenshot` or `spectacle` for captures. Time is still tracked without
-either — it is just not attributed to applications, and no pictures are taken.
+### It needs X11, not Wayland
+
+This is the one thing that stops the agent dead. The idle counter and the
+focused window both come from the X display; under Wayland neither is readable,
+so the agent starts, finds no idle source, and records **nothing at all**.
+
+    echo $XDG_SESSION_TYPE
+
+If that says `wayland`, log out and choose "Ubuntu on Xorg" from the gear icon
+at the login screen. `install.sh` refuses to install rather than leaving you
+with an agent that appears to run and tracks nothing.
+
+### Optional, but you want both
+
+`xdotool` for window titles, and one of `scrot`, `import`, `gnome-screenshot`
+or `spectacle` for captures. Time is still tracked without either — it is just
+not attributed to applications, and no pictures are taken, which quietly makes
+the consent page wrong. The installer says so if they are missing.
+
+Everything else is standard library, because every dependency is one more thing
+that can fail to install on somebody else's machine.
+
+## Running
+
+    systemctl --user status timetracker-agent
+    journalctl --user -u timetracker-agent -f
+
+The service is tied to the desktop session: it starts at login and stops at
+logout, because it can only watch a session that exists. It restarts itself if
+it crashes.
+
+To stop being tracked for a while, use **Pause** — in the tray menu or on the
+dashboard. A pause is recorded and enforced by the server. Stopping the service
+instead just looks like a broken agent, and after three days it emails you
+saying so.
 
 ## Enrol
 

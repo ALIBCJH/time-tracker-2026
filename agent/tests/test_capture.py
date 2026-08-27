@@ -495,3 +495,88 @@ def test_pausing_repeatedly_is_harmless(rig):
     for i in range(3):
         monitor.tick(T0 + timedelta(seconds=i * 5), mono=i * 5)
     assert spool.open_session() is None
+
+
+# ── Surviving a restart mid-pause ────────────────────────────────────────────
+
+def test_a_restart_during_a_pause_does_not_freeze_the_session(tmp_path):
+    """The agent is killed while somebody is away, and restarts after they are
+    back. The monitor comes up believing nobody is idle, so a pause mark left
+    on the session would never be cleared by anything — and the server holds an
+    open session at idle_since, which would freeze that person's total for the
+    rest of the day while they worked.
+    """
+    idle = FakeIdle()
+    spool = Spool(str(tmp_path))
+    monitor = ActivityMonitor(spool, idle, None, idle_threshold=900, poll_interval=5)
+
+    cu = spool.start_session('Alpha', started_at=T0.isoformat())
+    monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+    assert spool.open_session()['idle_since'] == T0.isoformat()
+    spool.close()
+
+    # Restart, exactly as agent_main does on boot.
+    restarted = Spool(str(tmp_path))
+    gaps, sessions = restarted.settle_interrupted_pause()
+    assert (gaps, sessions) == (1, 1)
+
+    fresh = ActivityMonitor(restarted, idle, None, idle_threshold=900, poll_interval=5)
+    idle.seconds = 0
+    fresh.tick(T0 + timedelta(minutes=30), mono=100)
+
+    row = restarted.open_session()
+    assert row['client_uuid'] == cu
+    assert row['idle_since'] is None          # counting again
+    assert row['dirty'] == 1                  # and the server will be told
+    restarted.close()
+
+
+def test_the_gap_left_by_the_crash_still_uploads(tmp_path):
+    """Closed at wherever it reached, rather than sitting unsent for ever with
+    the server counting the absence as work."""
+    idle = FakeIdle()
+    spool = Spool(str(tmp_path))
+    monitor = ActivityMonitor(spool, idle, None, idle_threshold=900, poll_interval=5)
+    spool.start_session('Alpha', started_at=T0.isoformat())
+    monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+    monitor.tick(T0 + timedelta(minutes=21), mono=10)      # pause held once
+    assert spool.pending_batch()['idle_periods'] == []     # still open, held back
+    spool.close()
+
+    restarted = Spool(str(tmp_path))
+    restarted.settle_interrupted_pause()
+    pending = restarted.pending_batch()['idle_periods']
+    assert len(pending) == 1
+    assert pending[0]['started_at'] == T0.isoformat()
+    assert pending[0]['ended_at'] == (T0 + timedelta(minutes=21)).isoformat()
+    restarted.close()
+
+
+def test_someone_still_away_after_a_restart_simply_pauses_again(tmp_path):
+    """Clearing the mark is safe: the next poll reads the idle counter, sees
+    the absence and pauses again from where input actually stopped. State is
+    rebuilt from the machine rather than trusted from before the crash."""
+    idle = FakeIdle()
+    spool = Spool(str(tmp_path))
+    monitor = ActivityMonitor(spool, idle, None, idle_threshold=900, poll_interval=5)
+    spool.start_session('Alpha', started_at=T0.isoformat())
+    monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+    spool.close()
+
+    restarted = Spool(str(tmp_path))
+    restarted.settle_interrupted_pause()
+    fresh = ActivityMonitor(restarted, idle, None, idle_threshold=900, poll_interval=5)
+
+    # Away since T0, which by minute 61 the counter reports as 61 minutes.
+    idle.seconds = 61 * 60
+    fresh.tick(T0 + timedelta(minutes=61), mono=100)
+
+    assert fresh.is_idle
+    assert restarted.open_session()['idle_since'] == T0.isoformat()
+    restarted.close()

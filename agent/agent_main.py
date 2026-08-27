@@ -50,11 +50,13 @@ class Controller:
                                  name=os.environ.get('TIMETRACKER_USER_NAME'))
         self.state.refresh_from_spool()
 
-        # A break left open by a crash is settled at wherever it reached, so it
-        # uploads instead of sitting unsent while the server counts it as work.
-        stale = self.spool.close_stale_idle()
-        if stale:
-            logger.info(f'Closed {stale} idle period(s) left open by a previous run')
+        # A pause left mid-flight by a crash is settled before anything else
+        # runs: the gap is closed so it uploads, and the session is un-marked so
+        # the server does not hold it at the moment of the pause all day.
+        gaps, sessions = self.spool.settle_interrupted_pause()
+        if gaps or sessions:
+            logger.info(f'Settled an interrupted pause — {gaps} idle period(s), '
+                        f'{sessions} session(s) resumed')
 
         idle_source, window_source = detect_sources()
         self.monitor = ActivityMonitor(

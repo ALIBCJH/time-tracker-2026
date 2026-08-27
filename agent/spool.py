@@ -255,15 +255,28 @@ class Spool:
             'UPDATE idle_periods SET ended_at=?, open=0 WHERE client_uuid=?',
             (ended_at, client_uuid))
 
-    def close_stale_idle(self):
-        """Settle any break left open by a crash, at wherever it last reached.
+    def settle_interrupted_pause(self):
+        """Settle a pause left mid-flight by a crash. Returns what it settled.
 
-        Called at startup. Without it the gap would sit unsent for ever and the
-        session it belongs to would have its break counted as work.
+        Called at startup, and it has to do BOTH halves or it makes things
+        worse. The idle row is closed at wherever it last reached, so the gap
+        uploads instead of sitting unsent for ever. And idle_since is cleared
+        from the open session, because the monitor comes up believing nobody is
+        idle — leaving the mark set would have the server hold that session at
+        the moment of the pause while the person worked the rest of the day,
+        freezing their total.
+
+        Clearing it is safe even if they really are still away: the very next
+        poll reads the idle counter, sees the absence and pauses again, from
+        where input actually stopped. State is rebuilt from the machine rather
+        than trusted from before the crash.
         """
-        cursor = self.conn.execute(
-            'UPDATE idle_periods SET open=0 WHERE open=1')
-        return cursor.rowcount
+        idle_rows = self.conn.execute(
+            'UPDATE idle_periods SET open=0 WHERE open=1').rowcount
+        sessions = self.conn.execute(
+            'UPDATE sessions SET idle_since=NULL, dirty=1 '
+            'WHERE ended_at IS NULL AND idle_since IS NOT NULL').rowcount
+        return idle_rows, sessions
 
     def set_idle_since(self, client_uuid, at):
         """Mark the open session as being in a break, or out of one (at=None).

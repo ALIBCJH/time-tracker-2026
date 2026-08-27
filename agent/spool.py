@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at        TEXT NOT NULL,
     ended_at          TEXT,
     last_heartbeat_at TEXT,
+    idle_since        TEXT,
     dirty             INTEGER NOT NULL DEFAULT 1,
     attempts          INTEGER NOT NULL DEFAULT 0,
     dead              INTEGER NOT NULL DEFAULT 0,
@@ -63,6 +64,10 @@ CREATE TABLE IF NOT EXISTS idle_periods (
     client_uuid TEXT PRIMARY KEY,
     started_at  TEXT NOT NULL,
     ended_at    TEXT NOT NULL,
+    -- 1 while the break is still happening. Written the moment input stops
+    -- rather than when it resumes, so an agent killed mid-break still leaves
+    -- the gap on record instead of the server counting it as work.
+    open        INTEGER NOT NULL DEFAULT 0,
     attempts    INTEGER NOT NULL DEFAULT 0,
     dead        INTEGER NOT NULL DEFAULT 0,
     synced_at   TEXT
@@ -104,6 +109,21 @@ class Spool:
         # WAL so a read while the uploader is writing doesn't block the tracker.
         self.conn.execute('PRAGMA journal_mode=WAL')
         self.conn.executescript(SCHEMA)
+        self._add_missing_columns()
+
+    def _add_missing_columns(self):
+        """Bring an already-installed spool up to the current shape.
+
+        CREATE TABLE IF NOT EXISTS does nothing to a table that already exists,
+        so a laptop that has been running since before pausing existed would
+        otherwise fail on the first write to a column it has never had.
+        """
+        for table, column, ddl in (
+                ('sessions', 'idle_since', 'TEXT'),
+                ('idle_periods', 'open', 'INTEGER NOT NULL DEFAULT 0')):
+            have = {r['name'] for r in self.conn.execute(f'PRAGMA table_info({table})')}
+            if column not in have:
+                self.conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {ddl}')
 
     def close(self):
         self.conn.close()
@@ -208,11 +228,49 @@ class Spool:
             'WHERE client_uuid = ?', (MAX_ATTEMPTS, client_uuid))
 
     def record_idle(self, started_at, ended_at):
+        """A break that is already over. Uploadable immediately."""
         cu = str(uuid.uuid4())
         self.conn.execute(
-            'INSERT INTO idle_periods (client_uuid, started_at, ended_at) VALUES (?,?,?)',
-            (cu, started_at, ended_at))
+            'INSERT INTO idle_periods (client_uuid, started_at, ended_at, open) '
+            'VALUES (?,?,?,0)', (cu, started_at, ended_at))
         return cu
+
+    def open_idle(self, started_at):
+        """A break that has just begun. Held back from upload until it closes —
+        the server takes an idle period as final, and re-sending a longer one
+        would be ignored by the conflict clause that makes resends safe."""
+        cu = str(uuid.uuid4())
+        self.conn.execute(
+            'INSERT INTO idle_periods (client_uuid, started_at, ended_at, open) '
+            'VALUES (?,?,?,1)', (cu, started_at, started_at))
+        return cu
+
+    def extend_idle(self, client_uuid, ended_at):
+        self.conn.execute(
+            'UPDATE idle_periods SET ended_at=? WHERE client_uuid=? AND open=1',
+            (ended_at, client_uuid))
+
+    def close_idle(self, client_uuid, ended_at):
+        self.conn.execute(
+            'UPDATE idle_periods SET ended_at=?, open=0 WHERE client_uuid=?',
+            (ended_at, client_uuid))
+
+    def close_stale_idle(self):
+        """Settle any break left open by a crash, at wherever it last reached.
+
+        Called at startup. Without it the gap would sit unsent for ever and the
+        session it belongs to would have its break counted as work.
+        """
+        cursor = self.conn.execute(
+            'UPDATE idle_periods SET open=0 WHERE open=1')
+        return cursor.rowcount
+
+    def set_idle_since(self, client_uuid, at):
+        """Mark the open session as being in a break, or out of one (at=None).
+        Dirty, so the server hears about it on the next upload."""
+        self.conn.execute(
+            'UPDATE sessions SET idle_since=?, dirty=1 '
+            'WHERE client_uuid=? AND ended_at IS NULL', (at, client_uuid))
 
     # ── Uploading ────────────────────────────────────────────────────────────
 
@@ -231,7 +289,8 @@ class Spool:
             batch['sessions'].append({
                 'client_uuid': r['client_uuid'], 'project': r['project'],
                 'task': r['task'], 'started_at': r['started_at'],
-                'ended_at': r['ended_at'], 'last_heartbeat_at': r['last_heartbeat_at']})
+                'ended_at': r['ended_at'], 'last_heartbeat_at': r['last_heartbeat_at'],
+                'idle_since': r['idle_since']})
 
         for r in self.conn.execute(
                 'SELECT * FROM app_usage WHERE synced_at IS NULL AND dead=0 '
@@ -243,7 +302,8 @@ class Spool:
                 'started_at': r['started_at'], 'ended_at': r['ended_at']})
 
         for r in self.conn.execute(
-                'SELECT * FROM idle_periods WHERE synced_at IS NULL AND dead=0 '
+                'SELECT * FROM idle_periods '
+                'WHERE synced_at IS NULL AND dead=0 AND open=0 '
                 'ORDER BY started_at LIMIT ?', (limit,)):
             batch['idle_periods'].append({
                 'client_uuid': r['client_uuid'], 'started_at': r['started_at'],

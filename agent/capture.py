@@ -24,6 +24,7 @@ POLL_INTERVAL = 5
 SUSPEND_GAP_FACTOR = 3       # a loop gap this many polls long means the box froze
 MIN_SPAN_SECONDS = 5         # shorter than this is a window flicker, not usage
 HEARTBEAT_INTERVAL = 60      # how often an open session is re-marked alive
+IDLE_THRESHOLD = 900         # 15 minutes of no input and the session pauses
 
 
 def _now():
@@ -32,7 +33,7 @@ def _now():
 
 class ActivityMonitor:
     def __init__(self, spool, idle_source, window_source=None,
-                 idle_threshold=600, poll_interval=POLL_INTERVAL,
+                 idle_threshold=IDLE_THRESHOLD, poll_interval=POLL_INTERVAL,
                  suspend_factor=SUSPEND_GAP_FACTOR,
                  min_span=MIN_SPAN_SECONDS,
                  heartbeat_interval=HEARTBEAT_INTERVAL,
@@ -54,7 +55,7 @@ class ActivityMonitor:
         self._running = True
         self._app = self._title = self._app_started = None
         self._idle_started = None
-        self._resume = None                 # (project, task) to reopen on return
+        self._idle_uuid = None              # the break currently on record
         self._last_mono = None
         self._last_heartbeat = None
 
@@ -76,34 +77,72 @@ class ActivityMonitor:
     # ── Idle ─────────────────────────────────────────────────────────────────
 
     def _go_idle(self, idle_for, now, reason='idle'):
-        """Input stopped `idle_for` seconds ago. Roll everything back to then."""
+        """Input stopped `idle_for` seconds ago. Pause, do not close.
+
+        The session stays open and keeps its project, its task and everything
+        recorded against it. Only the clock stops. Closing here — which is what
+        this used to do — chopped a day on one project into a fresh session
+        after every coffee, and made "carry on where I left off" impossible.
+
+        The break is written to the spool immediately rather than on return, so
+        an agent killed during it still leaves the gap on record. Otherwise the
+        session would come back from the dead counting the whole absence.
+        """
         started = now - timedelta(seconds=idle_for)
         self._idle_started = started
         self._flush_span(started)
 
         session = self.spool.open_session()
         if session:
-            self.spool.stop_session(session['client_uuid'], started.isoformat())
-            self._resume = (session['project'], session['task'])
+            self._idle_uuid = self.spool.open_idle(started.isoformat())
+            self.spool.set_idle_since(session['client_uuid'], started.isoformat())
             logger.info(
-                f"Session '{session['project']}' closed at "
+                f"Session '{session['project']}' paused at "
                 f"{started.isoformat(timespec='seconds')} ({reason}, "
                 f"{int(idle_for) // 60}m {int(idle_for) % 60}s)")
         else:
-            # Nothing was running, so there is nothing to reopen later.
-            self._resume = None
+            # Nothing was running, so there is no session to pause and no break
+            # worth recording against one.
+            self._idle_uuid = None
         self.is_idle = True
 
-    def _return_from_idle(self, now):
-        if self._idle_started:
-            self.spool.record_idle(self._idle_started.isoformat(), now.isoformat())
-        self._idle_started = None
+    def _hold_pause(self, now):
+        """Keep a running pause current while nobody is at the keyboard.
 
-        if self._resume:
-            project, task = self._resume
-            self.spool.start_session(project, task, now.isoformat())
-            logger.info(f"Resumed '{project}' after idle")
-            self._resume = None
+        Two things happen on every poll. The gap on record is extended, so a
+        crash loses at most one poll rather than the whole thing. And the
+        session is heartbeated — the agent IS alive, it is the person who is
+        away — because going silent would have the server cap the session as
+        abandoned after fifteen minutes and mail an alert about it.
+
+        Nothing here decides the pause has gone on too long. A pause simply
+        stops the clock and waits. Somebody who wants to stop for the day has a
+        pause control of their own, and guessing on their behalf is what made
+        this complicated the first time.
+        """
+        session = self.spool.open_session()
+        if not session or not self._idle_started:
+            return []
+
+        if self._idle_uuid:
+            self.spool.extend_idle(self._idle_uuid, now.isoformat())
+        self.spool.heartbeat(session['client_uuid'], now.isoformat())
+        return []
+
+    def _return_from_idle(self, now):
+        """Input is back. Close the gap and let the session count again."""
+        if self._idle_uuid:
+            self.spool.close_idle(self._idle_uuid, now.isoformat())
+        elif self._idle_started:
+            # Nothing was running when the idle began, so no record was opened
+            # then. The gap is still worth logging.
+            self.spool.record_idle(self._idle_started.isoformat(), now.isoformat())
+        self._idle_started = self._idle_uuid = None
+
+        session = self.spool.open_session()
+        if session:
+            self.spool.set_idle_since(session['client_uuid'], None)
+            logger.info(f"Resumed '{session['project']}' — same session")
 
         self.is_idle = False
         self._app_started = now
@@ -158,7 +197,11 @@ class ActivityMonitor:
             self._return_from_idle(now)
             events.append('returned')
 
-        if not self.is_idle:
+        if self.is_idle:
+            # A pause is not nothing happening: the break on record has to keep
+            # up with the clock, and the session has to be held alive.
+            events += self._hold_pause(now)
+        else:
             events += self._sample_window(now)
             self._maybe_heartbeat(now)
 
@@ -201,7 +244,7 @@ class ActivityMonitor:
     # ── The loop ─────────────────────────────────────────────────────────────
 
     def run(self):
-        logger.info(f'Capture started (idle threshold {self.idle_threshold // 60}m, '
+        logger.info(f'Capture started (pause after {self.idle_threshold // 60}m idle, '
                     f'poll {self.poll_interval}s)')
         while self._running:
             try:

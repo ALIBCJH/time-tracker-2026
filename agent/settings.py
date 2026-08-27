@@ -18,7 +18,7 @@ logger = logging.getLogger('agent.settings')
 
 DEFAULTS = {
     'timezone': 'UTC',
-    'idle_threshold_seconds': 600,
+    'idle_threshold_seconds': 900,
     'screenshot_interval_seconds': 600,
     'screenshots_enabled': True,
     'tracking_enabled': True,

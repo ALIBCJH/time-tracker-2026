@@ -50,6 +50,12 @@ class Controller:
                                  name=os.environ.get('TIMETRACKER_USER_NAME'))
         self.state.refresh_from_spool()
 
+        # A break left open by a crash is settled at wherever it reached, so it
+        # uploads instead of sitting unsent while the server counts it as work.
+        stale = self.spool.close_stale_idle()
+        if stale:
+            logger.info(f'Closed {stale} idle period(s) left open by a previous run')
+
         idle_source, window_source = detect_sources()
         self.monitor = ActivityMonitor(
             self.spool, idle_source, window_source,

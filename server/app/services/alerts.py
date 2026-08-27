@@ -105,6 +105,12 @@ def _eligible(user, now):
 def dropped_sessions(db, user, now=None, horizon=RECENT_DROP):
     """Sessions the server had to cap for this person, recently.
 
+    A session that was PAUSED when it was capped is not one of them. Idle
+    tracking had already stopped the clock, so nothing was being recorded to
+    lose — a laptop shut an hour after somebody walked away is the ordinary end
+    of a day, not a fault. Alerting on it would put a warning in the inbox
+    every evening, which is how a channel stops being read.
+
     Ordered oldest first so that if several are pending, the mail goes out in
     the order the failures happened.
     """
@@ -112,7 +118,8 @@ def dropped_sessions(db, user, now=None, horizon=RECENT_DROP):
     return (db.query(Session)
             .filter(Session.user_id == user.id,
                     Session.orphaned_at.isnot(None),
-                    Session.orphaned_at > now - horizon)
+                    Session.orphaned_at > now - horizon,
+                    Session.idle_since.is_(None))
             .order_by(Session.orphaned_at.asc())
             .all())
 

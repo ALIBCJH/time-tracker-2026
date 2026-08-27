@@ -14,7 +14,7 @@ move hours between days for anyone who works late.
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.models import Session
+from app.models import IdlePeriod, Session
 
 UTC = timezone.utc
 
@@ -46,8 +46,57 @@ def range_window(user, first_day, last_day):
 
 
 def _span(session, now):
-    """An open session counts up to now — but never past it."""
-    return session.started_at, min(session.ended_at or now, now)
+    """An open session counts up to now — but never past it.
+
+    A session that is paused right now stops at the moment input stopped, not
+    at now. The break it is in has no idle_periods row yet — that is only
+    written when somebody comes back — so without this the dashboard would
+    quietly count up through every lunch.
+    """
+    if session.ended_at is not None:
+        return session.started_at, min(session.ended_at, now)
+    return session.started_at, min(session.idle_since or now, now)
+
+
+def _idle_intervals(db, user, window_start, window_end):
+    """Completed breaks overlapping the window, merged and in order.
+
+    Merged because two overlapping rows would otherwise each be subtracted,
+    taking the same minute off twice and under-reporting the day. Overlap
+    should not happen, but a total that is wrong when it does is not worth the
+    few lines saved.
+    """
+    rows = (db.query(IdlePeriod)
+            .filter(IdlePeriod.user_id == user.id,
+                    IdlePeriod.started_at < window_end,
+                    IdlePeriod.ended_at > window_start)
+            .order_by(IdlePeriod.started_at)
+            .all())
+
+    merged = []
+    for row in rows:
+        if merged and row.started_at <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], row.ended_at))
+        else:
+            merged.append((row.started_at, row.ended_at))
+    return merged
+
+
+def _minus_idle(start, end, idles):
+    """The span with the breaks cut out of it. Yields the worked pieces."""
+    cursor = start
+    for idle_start, idle_end in idles:
+        if idle_end <= cursor:
+            continue
+        if idle_start >= end:
+            break
+        if idle_start > cursor:
+            yield cursor, min(idle_start, end)
+        cursor = max(cursor, idle_end)
+        if cursor >= end:
+            return
+    if cursor < end:
+        yield cursor, end
 
 
 def _overlapping(db, user, window_start, window_end):
@@ -80,14 +129,19 @@ def daily_totals(db, user, first_day, last_day, now=None):
     tz = user_tz(user)
     window_start, window_end = range_window(user, first_day, last_day)
 
+    idles = _idle_intervals(db, user, window_start, window_end)
+
     totals = {}
     for session in _overlapping(db, user, window_start, window_end):
         start, end = _span(session, now)
         start, end = max(start, window_start), min(end, window_end)
         if end <= start:
             continue
-        for day, seconds in _split_by_local_day(start, end, tz):
-            totals[day] = totals.get(day, 0) + seconds
+        # A session now contains the breaks taken during it, so the gaps come
+        # out before anything is counted.
+        for worked_start, worked_end in _minus_idle(start, end, idles):
+            for day, seconds in _split_by_local_day(worked_start, worked_end, tz):
+                totals[day] = totals.get(day, 0) + seconds
     return totals
 
 
@@ -121,11 +175,14 @@ def project_totals(db, user, first_day, last_day, now=None):
     now = now or datetime.now(UTC)
     window_start, window_end = range_window(user, first_day, last_day)
 
+    idles = _idle_intervals(db, user, window_start, window_end)
+
     totals = {}
     for session in _overlapping(db, user, window_start, window_end):
         start, end = _span(session, now)
         start, end = max(start, window_start), min(end, window_end)
-        seconds = int((end - start).total_seconds())
+        seconds = sum(int((b - a).total_seconds())
+                      for a, b in _minus_idle(start, end, idles))
         if seconds > 0:
             totals[session.project] = totals.get(session.project, 0) + seconds
     return [{'project': p, 'total_seconds': s}
@@ -138,11 +195,18 @@ def current_status(db, user, now=None):
     open_session = (db.query(Session)
                     .filter(Session.user_id == user.id, Session.ended_at.is_(None))
                     .one_or_none())
+    paused_since = open_session.idle_since if open_session else None
     return {
         'is_tracking': open_session is not None,
+        # Still the same session — it is simply not counting at the moment.
+        'is_paused': paused_since is not None,
+        'paused_since': paused_since,
         'project': open_session.project if open_session else None,
         'task': open_session.task if open_session else None,
         'started_at': open_session.started_at if open_session else None,
+        # Wall-clock since the session opened. Not the tracked total: this one
+        # includes the breaks, which is why the dashboard shows the day total
+        # from daily_totals rather than this.
         'elapsed_seconds': (int((now - open_session.started_at).total_seconds())
                             if open_session else 0),
         'last_heartbeat_at': open_session.last_heartbeat_at if open_session else None,

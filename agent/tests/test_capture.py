@@ -50,7 +50,7 @@ def rig(tmp_path):
     spool = Spool(str(tmp_path))
     idle = FakeIdle()
     window = FakeWindow()
-    monitor = ActivityMonitor(spool, idle, window, idle_threshold=600,
+    monitor = ActivityMonitor(spool, idle, window, idle_threshold=900,
                               poll_interval=5, min_span=5)
     yield monitor, spool, idle, window
     spool.close()
@@ -116,44 +116,103 @@ def test_stopping_banks_the_span_in_flight(rig):
 
 # ── Going idle ───────────────────────────────────────────────────────────────
 
-def test_crossing_the_threshold_closes_the_session(rig):
+def test_crossing_the_threshold_pauses_rather_than_closing(rig):
+    """The change this behaviour exists for. Closing here chopped a day on one
+    project into a fresh session after every coffee; the work is the same work,
+    so it stays the same session."""
     monitor, spool, idle, window = rig
-    spool.start_session('Alpha')
+    cu = spool.start_session('Alpha', 'the task')
     monitor.tick(T0, mono=0)
 
-    idle.seconds = 660                                        # 11 minutes
-    monitor.tick(T0 + timedelta(minutes=11), mono=5)
+    idle.seconds = 960                                        # 16 minutes
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
 
     assert monitor.is_idle
-    assert spool.open_session() is None
+    session = spool.open_session()
+    assert session is not None
+    assert session['client_uuid'] == cu
+    assert session['project'] == 'Alpha' and session['task'] == 'the task'
 
 
-def test_the_session_is_cut_back_to_when_input_stopped(rig):
-    """Not to the poll that noticed. The eleven minutes of staring at a wall
+def test_the_pause_is_dated_to_when_input_stopped(rig):
+    """Not to the poll that noticed. The sixteen minutes of staring at a wall
     are not work, and crediting them would be the difference between an honest
     number and a flattering one."""
     monitor, spool, idle, window = rig
     cu = spool.start_session('Alpha', started_at=T0.isoformat())
     monitor.tick(T0, mono=0)
 
-    noticed_at = T0 + timedelta(minutes=11)
-    idle.seconds = 660
+    noticed_at = T0 + timedelta(minutes=16)
+    idle.seconds = 960
     monitor.tick(noticed_at, mono=5)
 
-    row = spool.conn.execute('SELECT ended_at FROM sessions WHERE client_uuid=?',
-                             (cu,)).fetchone()
-    assert row['ended_at'] == T0.isoformat()          # 11 minutes before it was seen
+    row = spool.conn.execute(
+        'SELECT ended_at, idle_since FROM sessions WHERE client_uuid=?',
+        (cu,)).fetchone()
+    assert row['ended_at'] is None                    # paused, not finished
+    assert row['idle_since'] == T0.isoformat()        # 16 minutes before it was seen
+
+
+def test_the_break_is_on_record_the_moment_it_starts(rig):
+    """Written on the way in, not on the way out. An agent killed mid-break
+    would otherwise leave no gap at all, and the server would count the whole
+    absence as work."""
+    monitor, spool, idle, window = rig
+    spool.start_session('Alpha')
+    monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+
+    rows = idle_rows(spool)
+    assert len(rows) == 1
+    assert rows[0]['started_at'] == T0.isoformat()
+    assert rows[0]['open'] == 1
+
+
+def test_an_open_break_is_not_uploaded_until_it_closes(rig):
+    """The server treats an idle period as final — a resend of a longer one is
+    ignored by the conflict clause that makes resends safe. So a break in
+    progress is held back rather than sent and corrected."""
+    monitor, spool, idle, window = rig
+    spool.start_session('Alpha')
+    monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+    assert spool.pending_batch()['idle_periods'] == []
+
+    idle.seconds = 0
+    monitor.tick(T0 + timedelta(minutes=30), mono=10)
+    assert len(spool.pending_batch()['idle_periods']) == 1
+
+
+def test_the_session_stays_alive_while_paused(rig):
+    """The agent is alive; it is the person who is away. Without a heartbeat
+    the server would cap the session as abandoned after fifteen minutes and
+    mail an alert about a lunch break."""
+    monitor, spool, idle, window = rig
+    cu = spool.start_session('Alpha')
+    monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+
+    later = T0 + timedelta(minutes=40)
+    idle.seconds = 960 + 24 * 60
+    monitor.tick(later, mono=10)
+
+    row = spool.conn.execute(
+        'SELECT last_heartbeat_at FROM sessions WHERE client_uuid=?', (cu,)).fetchone()
+    assert row['last_heartbeat_at'] == later.isoformat()
 
 
 def test_the_span_in_flight_ends_where_the_idle_began(rig):
-    """Twenty minutes at the keyboard then eleven idle: the span is banked at
-    minute twenty, not at minute thirty-one when the idle was noticed."""
+    """Twenty minutes at the keyboard then sixteen idle: the span is banked at
+    minute twenty, not at minute thirty-six when the idle was noticed."""
     monitor, spool, idle, window = rig
     spool.start_session('Alpha')
     monitor.tick(T0, mono=0)
 
-    idle.seconds = 660
-    monitor.tick(T0 + timedelta(minutes=31), mono=5)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=36), mono=5)
 
     row = usage_rows(spool)[0]
     assert row['started_at'] == T0.isoformat()
@@ -162,7 +221,7 @@ def test_the_span_in_flight_ends_where_the_idle_began(rig):
 
 def test_going_idle_without_a_session_is_harmless(rig):
     monitor, spool, idle, window = rig
-    idle.seconds = 660
+    idle.seconds = 960
     monitor.tick(T0, mono=0)
     assert monitor.is_idle and spool.open_session() is None
 
@@ -173,8 +232,8 @@ def test_returning_reopens_the_session_that_was_running(rig):
     monitor, spool, idle, window = rig
     spool.start_session('Alpha', 'the task')
     monitor.tick(T0, mono=0)
-    idle.seconds = 660
-    monitor.tick(T0 + timedelta(minutes=11), mono=5)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
 
     idle.seconds = 0
     monitor.tick(T0 + timedelta(minutes=30), mono=10)
@@ -183,72 +242,109 @@ def test_returning_reopens_the_session_that_was_running(rig):
     assert reopened['project'] == 'Alpha' and reopened['task'] == 'the task'
 
 
-def test_the_reopened_session_starts_now_not_earlier(rig):
-    """The gap is not retroactively counted as work."""
+def test_coming_back_resumes_the_same_session(rig):
+    """Not a new one. This is what "pause, do not scrap" means in the data:
+    one session for the morning's work, with the coffee cut out of it."""
     monitor, spool, idle, window = rig
-    spool.start_session('Alpha')
+    cu = spool.start_session('Alpha', started_at=T0.isoformat())
     monitor.tick(T0, mono=0)
-    idle.seconds = 660
-    monitor.tick(T0 + timedelta(minutes=11), mono=5)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
 
     back = T0 + timedelta(minutes=45)
     idle.seconds = 0
     monitor.tick(back, mono=10)
-    assert spool.open_session()['started_at'] == back.isoformat()
+
+    session = spool.open_session()
+    assert session['client_uuid'] == cu
+    assert session['started_at'] == T0.isoformat()   # still the morning's session
+    assert session['idle_since'] is None             # and counting again
 
 
-def test_the_idle_gap_is_recorded(rig):
-    """The local app had an idle_periods table its monitor never wrote to."""
+def test_the_break_is_cut_out_of_the_resumed_session(rig):
+    """The session spans the gap, so the gap has to be on record — it is what
+    the server subtracts to keep the total honest."""
     monitor, spool, idle, window = rig
-    spool.start_session('Alpha')
+    spool.start_session('Alpha', started_at=T0.isoformat())
     monitor.tick(T0, mono=0)
-    idle.seconds = 660
-    monitor.tick(T0 + timedelta(minutes=11), mono=5)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+
+    back = T0 + timedelta(minutes=45)
     idle.seconds = 0
-    monitor.tick(T0 + timedelta(minutes=40), mono=10)
+    monitor.tick(back, mono=10)
 
     row = idle_rows(spool)[0]
     assert row['started_at'] == T0.isoformat()
-    assert row['ended_at'] == (T0 + timedelta(minutes=40)).isoformat()
+    assert row['ended_at'] == back.isoformat()
+    assert row['open'] == 0
 
 
-def test_nothing_reopens_if_nothing_was_running(rig):
+def test_a_pause_waits_however_long_it_takes(rig):
+    """No maximum, and no guessing that somebody has gone home. Four hours
+    later it is still the same session, still paused, still theirs to resume.
+    Stopping on purpose is what the pause control is for."""
     monitor, spool, idle, window = rig
-    idle.seconds = 660
+    cu = spool.start_session('Alpha', started_at=T0.isoformat())
     monitor.tick(T0, mono=0)
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+
+    idle.seconds = 4 * 3600
+    result = monitor.tick(T0 + timedelta(hours=4), mono=10)
+    assert result['events'] == []
+    session = spool.open_session()
+    assert session['client_uuid'] == cu and session['ended_at'] is None
+
+    back = T0 + timedelta(hours=5)
     idle.seconds = 0
-    monitor.tick(T0 + timedelta(minutes=20), mono=5)
-    assert spool.open_session() is None
+    monitor.tick(back, mono=15)
+    resumed = spool.open_session()
+    assert resumed['client_uuid'] == cu          # the same session, all along
+    assert idle_rows(spool)[0]['ended_at'] == back.isoformat()
 
 
 # ── Suspend ──────────────────────────────────────────────────────────────────
 
 def test_a_frozen_gap_is_not_credited_as_work(rig):
-    """A closed lid. The wall clock jumps two hours but the idle counter reads
-    near zero, because the X server was not running either — so the gap has to
-    be caught by the loop stalling, not by the idle counter.
+    """A closed lid. The wall clock jumps but the idle counter reads near zero,
+    because the X server was not running either — so the gap has to be caught
+    by the loop stalling, not by the idle counter.
 
-    Waking reopens a session, which is right: you are back. What must not
-    happen is the two suspended hours landing in the total.
+    Like any other idle, it pauses: same session, minus the frozen hours. What
+    must not happen is those hours landing in the total.
     """
     monitor, spool, idle, window = rig
     original = spool.start_session('Alpha', started_at=T0.isoformat())
     monitor.tick(T0, mono=0)
 
-    woke = T0 + timedelta(hours=2)
-    result = monitor.tick(woke, mono=7200)
+    woke = T0 + timedelta(hours=4)
+    result = monitor.tick(woke, mono=4 * 3600)
     assert 'suspend' in result['events']
 
-    closed = spool.conn.execute('SELECT ended_at FROM sessions WHERE client_uuid=?',
-                                (original,)).fetchone()
-    assert closed['ended_at'] == T0.isoformat()      # cut back to the freeze
+    session = spool.open_session()
+    assert session['client_uuid'] == original    # paused, not closed
+    assert session['ended_at'] is None
+    assert session['idle_since'] is None         # and already back, counting
 
-    reopened = spool.open_session()
-    assert reopened['client_uuid'] != original
-    assert reopened['started_at'] == woke.isoformat()
+    # The four hours are idle, not work.
+    row = idle_rows(spool)[-1]
+    assert row['started_at'] == T0.isoformat()
+    assert row['ended_at'] == woke.isoformat()
 
-    # The two hours are idle, not work.
-    assert idle_rows(spool)[0]['started_at'] == T0.isoformat()
+
+def test_a_short_freeze_behaves_the_same_way(rig):
+    """Twenty minutes with the lid shut is no different in kind from four
+    hours — there is one rule now, not a threshold between two."""
+    monitor, spool, idle, window = rig
+    original = spool.start_session('Alpha', started_at=T0.isoformat())
+    monitor.tick(T0, mono=0)
+
+    woke = T0 + timedelta(minutes=20)
+    assert 'suspend' in monitor.tick(woke, mono=20 * 60)['events']
+
+    session = spool.open_session()
+    assert session['client_uuid'] == original and session['ended_at'] is None
     assert idle_rows(spool)[0]['ended_at'] == woke.isoformat()
 
 
@@ -286,12 +382,13 @@ def test_a_failed_idle_query_does_not_close_the_session(rig):
 def test_time_is_still_tracked_without_a_window_source(rig, tmp_path):
     """A machine where xdotool is missing still records sessions and idle."""
     _, spool, idle, _ = rig
-    monitor = ActivityMonitor(spool, idle, window_source=None, idle_threshold=600)
+    monitor = ActivityMonitor(spool, idle, window_source=None, idle_threshold=900)
     spool.start_session('Alpha')
     monitor.tick(T0, mono=0)
-    idle.seconds = 660
-    monitor.tick(T0 + timedelta(minutes=11), mono=5)
-    assert spool.open_session() is None and usage_rows(spool) == []
+    idle.seconds = 960
+    monitor.tick(T0 + timedelta(minutes=16), mono=5)
+    assert monitor.is_idle and usage_rows(spool) == []
+    assert spool.open_session()['idle_since'] == T0.isoformat()
 
 
 def test_heartbeats_are_throttled(rig):

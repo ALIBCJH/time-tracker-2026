@@ -46,8 +46,11 @@
       <p class="sub">Days and weeks are measured here, wherever the server is.</p>
     </div>
     <div>
-      <label for="idle">Stop a session after this much idle time (minutes)</label>
+      <label for="idle">Pause a session after this much idle time (minutes)</label>
       <input id="idle" name="idle_threshold_minutes" value="{{ s.idle_threshold_seconds // 60 }}">
+      <p class="sub">The session is not closed &mdash; the idle time is left out
+        of the total and the same session carries on when you come back. To stop
+        for a while on purpose, use Pause tracking below.</p>
     </div>
     <div>
       <label for="dg">Daily goal (hours)</label>

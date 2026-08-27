@@ -232,3 +232,40 @@ def test_idle_periods_are_stored(agent, db):
 
 def test_sync_needs_a_token(client):
     assert client.post('/api/agent/sync', json={}).status_code == 401
+
+
+# ── Pausing ──────────────────────────────────────────────────────────────────
+
+def test_a_paused_session_arrives_marked_as_paused(agent, db):
+    """The break in progress has no idle_periods row yet, so the mark on the
+    session is the only thing that stops the total counting up through it."""
+    cu = uuid.uuid4()
+    agent({'sessions': [a_session(cu)]})
+    agent({'sessions': [a_session(cu, idle_since=iso(T0 + timedelta(hours=2)))]})
+
+    row = db.query(Session).filter_by(client_uuid=cu).one()
+    assert row.idle_since == T0 + timedelta(hours=2)
+    assert row.ended_at is None          # paused, not finished
+
+
+def test_resuming_clears_the_mark(agent, db):
+    """It goes back to NULL the same way it was set — by the agent resending
+    the session. Nothing else may clear it, or a resume would be invented."""
+    cu = uuid.uuid4()
+    agent({'sessions': [a_session(cu, idle_since=iso(T0 + timedelta(hours=2)))]})
+    agent({'sessions': [a_session(cu, idle_since=None)]})
+
+    assert db.query(Session).filter_by(client_uuid=cu).one().idle_since is None
+
+
+def test_a_session_that_never_paused_has_no_mark(agent, db):
+    cu = uuid.uuid4()
+    agent({'sessions': [a_session(cu)]})
+    assert db.query(Session).filter_by(client_uuid=cu).one().idle_since is None
+
+
+def test_a_malformed_pause_mark_is_refused(agent, db):
+    """Same treatment as every other instant on the record."""
+    response = agent({'sessions': [a_session(idle_since='the day before')]})
+    assert response.status_code == 200
+    assert response.get_json()['rejected']

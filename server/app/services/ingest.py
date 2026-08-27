@@ -105,6 +105,11 @@ def _upsert_session(db, user, record, now):
     beat = record.get('last_heartbeat_at')
     beat = parse_instant(beat, 'last_heartbeat_at', now=now) if beat else None
 
+    # When the break the session is currently in began, if it is in one. Cleared
+    # by the agent on return, so it goes back to NULL the same way it was set.
+    idle_since = record.get('idle_since')
+    idle_since = parse_instant(idle_since, 'idle_since', now=now) if idle_since else None
+
     values = {
         'user_id': user.id,
         'client_uuid': parse_uuid(record.get('client_uuid'), 'client_uuid'),
@@ -113,6 +118,7 @@ def _upsert_session(db, user, record, now):
         'started_at': started,
         'ended_at': ended,
         'last_heartbeat_at': beat,
+        'idle_since': idle_since,
     }
     stmt = insert(Session).values(**values)
     # A session is uploaded once when it opens and again when it closes, so the
@@ -123,7 +129,8 @@ def _upsert_session(db, user, record, now):
         set_={'project': stmt.excluded.project,
               'task': stmt.excluded.task,
               'ended_at': stmt.excluded.ended_at,
-              'last_heartbeat_at': stmt.excluded.last_heartbeat_at},
+              'last_heartbeat_at': stmt.excluded.last_heartbeat_at,
+              'idle_since': stmt.excluded.idle_since},
     )
     db.execute(stmt)
 

@@ -13,7 +13,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 ## A. Capture agent — runs on each user's machine
 
 - [x] A1  Active window + app detection (X11 `xdotool`; from `activity.py`)
-- [x] A2  Idle detection via X11 screensaver counter, 10-min session cutoff
+- [x] A2  Idle detection via X11 screensaver counter, 15-min pause threshold
 - [x] A3  Suspend/freeze detection (loop-gap heuristic)
 - [x] A4  App-usage logging — titles normalised at capture so spans do not fragment
 - [x] A5  Idle-period logging — actually written now; the local app never did
@@ -125,9 +125,22 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] I8  Agent staleness on the admin team page — shown, never mailed
 - [x] I9  `check-agents [--dry-run]` for inspecting the condition by hand
 
+## J. Idle pauses a session instead of closing it — all NEW
+
+- [x] J1  15 minutes of no input pauses; it used to close at 10
+- [x] J2  The same session resumes — project, task and history intact
+- [x] J3  `sessions.idle_since` — the idle stretch in progress, which has no row yet
+- [x] J4  Every total subtracts idle, merged so no minute is deducted twice
+- [x] J5  Idle is spooled when it STARTS, so a crash cannot hide it
+- [x] J6  Idle in progress is held back from upload until it ends
+- [x] J7  The session is heartbeated while paused, so it is not capped as dead
+- [x] J8  A pause waits indefinitely — no maximum, no guessing
+- [x] J9  A suspend of any length pauses; there is one rule, not a threshold
+- [x] J10 A session paused when it was capped raises no I2 alert
+
 ---
 
-All 87 done. What is deliberately NOT here, and why:
+All 97 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,
@@ -144,3 +157,8 @@ All 87 done. What is deliberately NOT here, and why:
 - **No alert to an administrator about somebody else's agent.** They have the
   team page, which shows the same staleness by looking. Being notified about a
   colleague's laptop is a different thing from being able to check on it.
+- **No maximum pause, and no "breaks".** A pause stops the clock and waits, for
+  as long as it takes. Deciding on somebody's behalf that they have been away
+  long enough to have gone home needs working hours nobody is asked for, and it
+  was a second concept doing a job the pause control (G10) already does. One
+  rule — idle pauses, you resume, or you pause on purpose — is the whole of it.

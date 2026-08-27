@@ -104,8 +104,12 @@ class UserSettings(Base):
     day_goal_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=8 * 3600)
     week_goal_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=40 * 3600)
 
-    # Seconds of no input before an open session is closed.
-    idle_threshold_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=600)
+    # Seconds of no input before the running session PAUSES. It is not closed:
+    # the idle time is excluded from the total and the same session continues
+    # when you come back, so a day's work on one project is one session rather
+    # than a dozen fragments. A pause waits indefinitely — somebody who wants
+    # to stop has the pause control in tracking_paused_until for that.
+    idle_threshold_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
     screenshot_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=600)
     screenshots_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
@@ -225,6 +229,11 @@ class Session(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the current pause began, or NULL if input is flowing. A completed
+    # break becomes an idle_periods row; this covers the one still happening,
+    # which has no row yet — without it the dashboard would keep counting up
+    # while somebody is at lunch.
+    idle_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Set when the server capped this session itself because the agent went
     # silent. It is the difference between an end time somebody asserted and
     # one we inferred, and only the inferred kind is worth telling anyone about

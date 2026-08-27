@@ -21,7 +21,7 @@ class FakeClient:
 
 
 def test_it_starts_from_defaults():
-    assert RemoteSettings().get('idle_threshold_seconds') == 600
+    assert RemoteSettings().get('idle_threshold_seconds') == 900
 
 
 def test_a_refresh_applies_the_servers_values():

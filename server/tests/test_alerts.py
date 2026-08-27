@@ -123,6 +123,17 @@ def test_an_old_drop_is_not_news(db, user, sent):
     assert sent == []
 
 
+def test_a_session_that_was_paused_when_it_was_capped_is_not_an_alert(db, user, sent):
+    """The clock had already stopped, so nothing was being recorded to lose.
+    A laptop shut an hour after somebody walked away is the ordinary end of a
+    day; warning about it every evening is how a channel stops being read."""
+    s = dropped(db, user)
+    s.idle_since = NOW - timedelta(hours=4)
+    db.commit()
+    assert A.run_due(db, [user], now=NOW) == []
+    assert sent == []
+
+
 # ── The device that stopped reporting ────────────────────────────────────────
 
 def test_a_device_silent_for_days_alerts(db, user, sent):

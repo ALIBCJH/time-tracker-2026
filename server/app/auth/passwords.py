@@ -7,6 +7,8 @@ guessing attack against a stolen database expensive.
 Contrast app/auth/tokens.py, which uses a *fast* hash for exactly the opposite
 reason. Both are correct; the difference is where the entropy comes from.
 """
+import functools
+
 from werkzeug.security import check_password_hash, generate_password_hash
 
 MIN_LENGTH = 12
@@ -34,3 +36,33 @@ def verify_password(password: str, password_hash: str) -> bool:
         return check_password_hash(password_hash, password)
     except (ValueError, TypeError):
         return False
+
+
+@functools.lru_cache(maxsize=1)
+def _dummy_hash() -> str:
+    """A hash of a password nobody has, with the same parameters as a real one.
+
+    Computed once, on first use rather than at import, so a CLI command that
+    never authenticates anybody does not pay for it.
+    """
+    return generate_password_hash('there-is-no-account-with-this-password')
+
+
+def verify_in_constant_work(password: str, password_hash: str | None) -> bool:
+    """Verify, and spend the same time when there is nothing to verify against.
+
+    scrypt is deliberately slow — around 170ms here — which is exactly right
+    against a stolen database and exactly wrong if it only runs for addresses
+    that exist. Returning early for an unknown address makes the response
+    around 170ms faster, and that gap is an account-enumeration oracle as
+    surely as a different error message would be. The login route is careful to
+    say the same thing in every failure case; this makes it take the same time
+    as well.
+
+    So an absent hash is compared against a dummy one instead of skipped. The
+    answer is still False; it just costs what a real answer costs.
+    """
+    if not password_hash:
+        check_password_hash(_dummy_hash(), password or '')
+        return False
+    return verify_password(password, password_hash)

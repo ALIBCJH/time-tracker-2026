@@ -243,3 +243,63 @@ def test_an_agent_token_is_not_a_login(client, db, password):
 
 def test_health_check_needs_no_credentials(client):
     assert client.get('/healthz').status_code == 200
+
+
+# ── Not leaking which addresses exist ────────────────────────────────────────
+
+def test_an_absent_hash_still_costs_a_comparison():
+    """scrypt takes about 170ms. Skipping it when there is no account answers
+    that much faster, and the gap enumerates accounts as surely as a different
+    error message would."""
+    from app.auth import passwords
+
+    calls = []
+    real = passwords.check_password_hash
+    try:
+        passwords.check_password_hash = lambda h, p: (calls.append(h), real(h, p))[1]
+        assert passwords.verify_in_constant_work('anything', None) is False
+        assert len(calls) == 1, 'no hash was compared for an absent account'
+    finally:
+        passwords.check_password_hash = real
+
+
+def test_login_does_the_same_work_for_known_and_unknown_addresses(client, db,
+                                                                  make_login_user,
+                                                                  password, monkeypatch):
+    """Counted rather than timed: a timing assertion on a CI runner is a test
+    that fails on a busy afternoon and teaches everyone to ignore it."""
+    from app.auth import passwords
+
+    make_login_user('real@example.com')
+
+    counts = []
+    real = passwords.check_password_hash
+
+    def counting(h, p):
+        counts.append(1)
+        return real(h, p)
+
+    monkeypatch.setattr(passwords, 'check_password_hash', counting)
+
+    counts.clear()
+    client.post('/login', data={'email': 'real@example.com', 'password': 'wrong-one-entirely'})
+    known = len(counts)
+
+    counts.clear()
+    client.post('/login', data={'email': 'nobody@example.com', 'password': 'wrong-one-entirely'})
+    unknown = len(counts)
+
+    assert known == unknown == 1
+
+
+def test_a_correct_password_still_signs_in(client, db, make_login_user, password):
+    """The obvious thing the change above could have broken."""
+    from app.services import consent as C
+
+    user = make_login_user('real@example.com')
+    C.record(db, user)
+    response = client.post('/login',
+                           data={'email': 'real@example.com', 'password': password},
+                           follow_redirects=False)
+    assert response.status_code == 302
+    assert '/login' not in response.headers['Location']

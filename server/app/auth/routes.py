@@ -3,7 +3,7 @@ from flask import (Blueprint, flash, redirect, render_template, request,
                    session, url_for)
 from flask_login import current_user, login_required, login_user, logout_user
 
-from app.auth.passwords import verify_password
+from app.auth.passwords import verify_in_constant_work
 from app.db import db_session
 from app.models import User
 from app.ratelimit import LOGIN_ATTEMPTS, clear, hit
@@ -36,10 +36,17 @@ def login():
 
         user = db_session.query(User).filter(User.email == email).one_or_none()
 
+        # The hash is always compared, even when there is no account and no
+        # hash to compare against. Skipping it would answer roughly 170ms
+        # faster for an address that does not exist, and that gap enumerates
+        # accounts just as surely as a different error message would.
+        correct = verify_in_constant_work(
+            password, user.password_hash if user is not None else None)
+
         # One message for every failure — unknown email, wrong password and
         # deactivated account are indistinguishable to the caller. Anything more
         # specific is an account-enumeration oracle.
-        if user is None or not user.is_active or not verify_password(password, user.password_hash):
+        if user is None or not user.is_active or not correct:
             flash(GENERIC_FAILURE, 'error')
             return render_template('login.html', email=email), 401
 

@@ -88,6 +88,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 ## G. Multi-user platform — all NEW
 
 - [x] G1  User accounts + login
+- [x] G1a Login answers in the same TIME for a real and an absent address
 - [x] G2  Password reset
 - [x] G3  Roles: worker vs admin
 - [x] G4  Per-device agent tokens
@@ -175,7 +176,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
-All 126 done. What is deliberately NOT here, and why:
+All 127 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

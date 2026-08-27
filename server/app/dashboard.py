@@ -8,7 +8,7 @@ Benson's Tuesday started is a fact about Benson.
 from datetime import date, datetime, timedelta, timezone
 
 from flask import (Blueprint, abort, flash, jsonify, redirect,
-                   render_template, request, url_for)
+                   render_template, request, session, url_for)
 from flask_login import current_user, login_required
 
 from app.auth.decorators import admin_required
@@ -388,6 +388,63 @@ def save_settings():
 
     db_session.commit()
     flash('Settings saved.', 'ok')
+    return redirect(url_for('dashboard.settings'))
+
+
+@bp.post('/settings/password')
+@login_required
+def change_password():
+    """Change your own password, knowing the current one.
+
+    It exists because the alternative was asking an administrator for a link
+    and waiting — and the moment somebody wants a new password in a hurry is
+    exactly the moment waiting is worst.
+
+    Your own only. There is no ?user= here and there deliberately is not one:
+    setting somebody else's password is impersonation, whoever does it.
+    """
+    from flask_login import login_user
+
+    from app.auth.passwords import (MIN_LENGTH, WeakPassword, hash_password,
+                                    session_fingerprint, verify_password)
+    from app.ratelimit import hit
+
+    # The current-password field is a guessing oracle for anybody holding a
+    # stolen session, so it is limited like the login form is.
+    allowed, _ = hit(db_session, 'password-change', str(current_user.id), 10)
+    if not allowed:
+        flash('Too many attempts. Try again in a few minutes.', 'error')
+        return redirect(url_for('dashboard.settings'))
+
+    current = request.form.get('current_password') or ''
+    new = request.form.get('new_password') or ''
+
+    if not verify_password(current, current_user.password_hash):
+        flash('That is not your current password.', 'error')
+        return redirect(url_for('dashboard.settings'))
+    if new != (request.form.get('confirm_password') or ''):
+        flash('The two new passwords do not match.', 'error')
+        return redirect(url_for('dashboard.settings'))
+    if new == current:
+        flash('That is the password you already have.', 'error')
+        return redirect(url_for('dashboard.settings'))
+
+    try:
+        current_user.password_hash = hash_password(new)
+    except WeakPassword as e:
+        flash(str(e), 'error')
+        return redirect(url_for('dashboard.settings'))
+    db_session.commit()
+
+    # Every session bound to the old password stops resolving to anybody, which
+    # is the point — including, unless it is re-established here, this one.
+    user = current_user._get_current_object()
+    session.clear()
+    session.permanent = True
+    login_user(user, remember=False)
+    session['pw'] = session_fingerprint(user.password_hash)
+
+    flash('Password changed. Anywhere else you were signed in has been signed out.', 'ok')
     return redirect(url_for('dashboard.settings'))
 
 

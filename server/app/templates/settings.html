@@ -121,4 +121,29 @@
             padding:14px 16px; margin-top:16px; }
   code { background:var(--bg); padding:1px 5px; border-radius:4px; font-size:13px; }
 </style>
+
+<div class="card">
+  <h2>Password</h2>
+  <form method="post" action="{{ url_for('dashboard.change_password') }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label for="cur">Current password</label>
+      <input id="cur" type="password" name="current_password" autocomplete="current-password" required>
+    </div>
+    <div>
+      <label for="new">New password</label>
+      <input id="new" type="password" name="new_password" autocomplete="new-password"
+             minlength="12" required>
+      <p class="sub">At least 12 characters.</p>
+    </div>
+    <div>
+      <label for="conf">New password again</label>
+      <input id="conf" type="password" name="confirm_password" autocomplete="new-password"
+             minlength="12" required>
+    </div>
+    <div><button type="submit">Change password</button></div>
+  </form>
+  <p class="sub">Changing it signs you out everywhere else — which is the point
+    if you think somebody else has it.</p>
+</div>
 {% endblock %}

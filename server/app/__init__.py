@@ -1,5 +1,6 @@
 """Application factory."""
 import os
+from datetime import timedelta
 
 from flask import Flask, jsonify, redirect, url_for
 from flask_login import LoginManager
@@ -23,6 +24,12 @@ def create_app(**overrides):
         # Only sent over HTTPS in production. Off in development because there
         # is no TLS on localhost and the cookie would never be set at all.
         SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',
+        # Flask checks the signature's age against this when it loads a
+        # session, so the limit is enforced here rather than trusted to the
+        # browser's cookie expiry. Refreshed on every request, which is what
+        # makes it idle time rather than a fixed countdown.
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=config.SESSION_IDLE_HOURS),
+        SESSION_REFRESH_EACH_REQUEST=True,
         WTF_CSRF_TIME_LIMIT=None,
         # A capture is ~120KB as WebP; the ceiling is generous enough for a
         # 4K screen and tight enough that a broken client cannot post a DVD.
@@ -90,11 +97,35 @@ def create_app(**overrides):
 
 @login_manager.user_loader
 def load_user(user_id):
+    """The signed-in user, or None if this session no longer stands.
+
+    A session records a fingerprint of the password hash it was created under.
+    Changing a password changes the hash, which changes the fingerprint, which
+    makes every other session stop resolving to anybody — so "change my
+    password" actually ends the sessions somebody else may be holding, which is
+    the entire reason a person changes it in a hurry.
+
+    Stateless, so it costs no table and no cleanup: the cookie carries the
+    fingerprint and the database carries the truth.
+    """
     import uuid
+
+    from flask import session as flask_session
+
+    from app.auth.passwords import session_fingerprint
+
     try:
-        return db_session.get(User, uuid.UUID(str(user_id)))
+        user = db_session.get(User, uuid.UUID(str(user_id)))
     except (ValueError, TypeError):
         return None
+    if user is None:
+        return None
+    # Absent rather than wrong is still refused: a session predating this check
+    # cannot be told apart from one being replayed, and the cost of refusing is
+    # one sign-in.
+    if flask_session.get('pw') != session_fingerprint(user.password_hash):
+        return None
+    return user
 
 
 @login_manager.unauthorized_handler

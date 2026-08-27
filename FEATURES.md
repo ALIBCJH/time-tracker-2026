@@ -90,6 +90,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] G1  User accounts + login
 - [x] G1a Login answers in the same TIME for a real and an absent address
 - [x] G2  Password reset
+- [x] G2a Change your own password, without asking an administrator
+- [x] G2b Changing it signs out every other session
+- [x] G2c Idle sign-out after 12 hours, enforced server-side
 - [x] G3  Roles: worker vs admin
 - [x] G4  Per-device agent tokens
 - [x] G5  `user_id` on every table; every query filtered
@@ -176,7 +179,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
-All 127 done. What is deliberately NOT here, and why:
+All 130 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

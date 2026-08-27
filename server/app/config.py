@@ -27,6 +27,12 @@ def require(name: str) -> str:
 DATABASE_URL = require('DATABASE_URL')
 SECRET_KEY = os.environ.get('SECRET_KEY', '')
 
+# How long a signed-in browser may sit idle. Long enough to cover a working day
+# without interrupting anybody, short enough that a machine left unlocked
+# overnight is signed out by morning. It slides: every request refreshes it, so
+# this is idle time and not a countdown from signing in.
+SESSION_IDLE_HOURS = int(os.environ.get('SESSION_IDLE_HOURS', 12))
+
 # Every user gets their own, but a new account has to start somewhere and this
 # is a Nairobi-based team.
 DEFAULT_TIMEZONE = os.environ.get('DEFAULT_TIMEZONE', 'Africa/Nairobi')

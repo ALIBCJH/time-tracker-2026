@@ -66,6 +66,10 @@ MAIL_FROM=
 
 DEFAULT_TIMEZONE=Africa/Nairobi
 
+# Hours a signed-in browser may sit idle before it is signed out. Slides on
+# every request, so it is idle time rather than a countdown from signing in.
+SESSION_IDLE_HOURS=12
+
 # Where nightly dumps are kept on this instance. Read by docker-compose.prod.yml
 # to bind-mount into the database container.
 BACKUP_DIR=/var/backups/ttcloud

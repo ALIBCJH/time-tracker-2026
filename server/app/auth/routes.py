@@ -3,7 +3,7 @@ from flask import (Blueprint, flash, redirect, render_template, request,
                    session, url_for)
 from flask_login import current_user, login_required, login_user, logout_user
 
-from app.auth.passwords import verify_in_constant_work
+from app.auth.passwords import session_fingerprint, verify_in_constant_work
 from app.db import db_session
 from app.models import User
 from app.ratelimit import LOGIN_ATTEMPTS, clear, hit
@@ -56,7 +56,14 @@ def login():
         # sitting next to a lockout.
         clear(db_session, 'login-email', email)
         session.clear()
+        # Permanent so the lifetime applies at all: Flask only enforces the
+        # idle limit on a permanent session. It is not "remember me" — the
+        # cookie still carries no long-lived credential.
+        session.permanent = True
         login_user(user, remember=False)
+        # Which password this session belongs to. Changing it ends this session
+        # and every other one.
+        session['pw'] = session_fingerprint(user.password_hash)
         return redirect(_safe_next() or url_for('dashboard.index'))
 
     return render_template('login.html', email='')

@@ -8,6 +8,7 @@ Contrast app/auth/tokens.py, which uses a *fast* hash for exactly the opposite
 reason. Both are correct; the difference is where the entropy comes from.
 """
 import functools
+import hashlib
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -66,3 +67,14 @@ def verify_in_constant_work(password: str, password_hash: str | None) -> bool:
         check_password_hash(_dummy_hash(), password or '')
         return False
     return verify_password(password, password_hash)
+
+
+def session_fingerprint(password_hash: str) -> str:
+    """A short, non-reversible marker of which password a session belongs to.
+
+    The hash itself never goes into a cookie — a scrypt hash in a signed but
+    readable session is a hash handed to anybody who looks. This is a truncated
+    digest of it: enough to notice the password changed, useless for anything
+    else.
+    """
+    return hashlib.sha256((password_hash or '').encode()).hexdigest()[:16]

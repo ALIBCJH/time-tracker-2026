@@ -266,6 +266,35 @@ def screenshots():
                            next_day=day + timedelta(days=1))
 
 
+@bp.get('/year')
+@login_required
+def year():
+    """A person's whole year, month by month.
+
+    Reachable for anyone about themselves, and for an admin about anybody —
+    the same rule as every other view here, enforced by _subject() rather than
+    by a second gate that could drift from the first.
+    """
+    user = _subject()
+    now = datetime.now(timezone.utc)
+    today = R.logical_today(user, now)
+
+    raw = request.args.get('year')
+    try:
+        year = int(raw) if raw else today.year
+    except (TypeError, ValueError):
+        abort(404)
+    # A bound, so a crafted ?year=999999 cannot ask the database for a million
+    # days. Nothing exists before this project did.
+    if not 2024 <= year <= today.year + 1:
+        abort(404)
+
+    return render_template('year.html', subject=user,
+                           summary=R.year_summary(db_session, user, year, now=now),
+                           viewing_other=user.id != current_user.id,
+                           this_year=today.year, hm=R.format_hm)
+
+
 # ── Consent, pause, settings ─────────────────────────────────────────────────
 
 @bp.get('/consent')

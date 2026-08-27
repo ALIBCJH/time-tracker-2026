@@ -156,9 +156,19 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] K10 Screenshot timing jittered ±35%, so the schedule cannot be worked around
 - [x] K11 Consent version bumped — everyone is asked again
 
+## L. The year, month by month — all NEW
+
+- [x] L1  A person's whole year in the admin panel, twelve months at a glance
+- [x] L2  Hours, days worked, average working day and activity per month
+- [x] L3  Built on `daily_totals`, so breaks and timezones behave as everywhere
+- [x] L4  Months cut at the worker's own midnight, not the server's
+- [x] L5  Future months shown and empty — a year stopping in August reads wrong
+- [x] L6  Anyone sees their own; an admin sees anybody's, via the same rule
+- [x] L7  Year bounded, so a crafted query cannot ask for a million days
+
 ---
 
-All 112 done. What is deliberately NOT here, and why:
+All 119 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

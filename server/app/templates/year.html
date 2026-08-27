@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ summary.year }} — TimeTracker{% endblock %}
+{% block body %}
+{% if viewing_other %}
+  <div class="notice">Viewing <strong>{{ subject.name }}</strong>
+    ({{ subject.settings.timezone }}) ·
+    <a href="{{ url_for('dashboard.team') }}">back to the team</a></div>
+{% endif %}
+
+<div class="card">
+  <div class="row-between">
+    <div>
+      <h1>{{ hm(summary.total_seconds) }}</h1>
+      <p class="sub">tracked in {{ summary.year }}
+        · {{ summary.worked_days }} day{{ '' if summary.worked_days == 1 else 's' }} worked
+        · {{ subject.settings.timezone }}</p>
+    </div>
+    <div class="num">
+      {% set q = '&user=' ~ subject.id if viewing_other else '' %}
+      <a href="?year={{ summary.year - 1 }}{{ q }}">← {{ summary.year - 1 }}</a>
+      {% if summary.year < this_year %}
+        &nbsp;·&nbsp;<a href="?year={{ summary.year + 1 }}{{ q }}">{{ summary.year + 1 }} →</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {#- The same bar treatment as the week on the dashboard, so a year reads the
+      way a week does rather than as a different kind of page. -#}
+  <div class="bars">
+    {% set peak = summary.months | map(attribute='total_seconds') | max %}
+    {% for m in summary.months %}
+      <div class="bar-col">
+        <div class="bar-val">{{ hm(m.total_seconds) if m.total_seconds else '' }}</div>
+        <div class="bar-track">
+          <div class="bar-fill{{ ' today' if m.is_current }}"
+               style="height:{{ (100 * m.total_seconds / peak) if peak else 0 }}%"></div>
+        </div>
+        <div class="bar-lbl{{ ' today' if m.is_current }}">{{ m.label }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Month by month</h2>
+  <table>
+    <tr><th>Month</th><th align="right">Tracked</th><th align="right">Days</th>
+        <th align="right">Average day</th><th align="right">Active</th></tr>
+    {% for m in summary.months %}
+      {#- Future months are shown and empty. A year that stops in August reads
+          as somebody who left. -#}
+      <tr{% if m.is_future %} style="opacity:.4"{% endif %}>
+        <td>{{ m.name }}{% if m.is_current %} <span class="tag on">this month</span>{% endif %}</td>
+        <td align="right" class="num">{{ hm(m.total_seconds) if m.total_seconds else '—' }}</td>
+        <td align="right" class="num">{{ m.worked_days or '—' }}</td>
+        <td align="right" class="num">{{ hm(m.average_seconds) if m.total_seconds else '—' }}</td>
+        {#- A dash where nothing was measured. "No data" and "did nothing" are
+            different answers and must not render the same. -#}
+        <td align="right" class="num">
+          {% if m.activity_percent is none %}<span class="sub">—</span>
+          {% else %}<span class="{{ 'act low' if m.activity_percent < 20 }}">{{ m.activity_percent }}%</span>
+          {% endif %}</td>
+      </tr>
+    {% endfor %}
+  </table>
+
+  {% if summary.best_month %}
+    <p class="sub" style="margin-top:16px">
+      Busiest month was {{ summary.best_month.name }}
+      at {{ hm(summary.best_month.total_seconds) }}, and the average across
+      months with any work in them is {{ hm(summary.average_seconds) }}.
+      &ldquo;Active&rdquo; is the share of tracked minutes with keyboard or mouse
+      input &mdash; reading and calls are work and both look like 0%.</p>
+  {% else %}
+    <p class="sub" style="margin-top:16px">Nothing tracked in {{ summary.year }}.</p>
+  {% endif %}
+</div>
+<style>
+  .act.low { color:#9a3412; font-weight:600; }
+</style>
+{% endblock %}

@@ -254,6 +254,87 @@ def activity_for_instants(db, user, instants):
     return found
 
 
+def monthly_totals(db, user, year, now=None):
+    """One row per month of `year`, in the user's own timezone.
+
+    Built on daily_totals rather than on its own query, so a session running
+    past midnight, a break taken at lunch and a person in another timezone are
+    all handled the way they are everywhere else. A second implementation of
+    "how long was that" is how two pages start disagreeing.
+
+    Future months are present and empty rather than absent: a year with a hole
+    in it reads as missing data, and a year that stops in August reads as a
+    person who left.
+    """
+    now = now or datetime.now(UTC)
+    today = logical_today(user, now)
+    first, last = date(year, 1, 1), date(year, 12, 31)
+
+    daily = daily_totals(db, user, first, last, now=now)
+    activity = _activity_by_month(db, user, first, last)
+
+    months = []
+    for month in range(1, 13):
+        days = {day: seconds for day, seconds in daily.items()
+                if day.year == year and day.month == month}
+        total = sum(days.values())
+        active, tracked = activity.get(month, (0, 0))
+        months.append({
+            'month': month,
+            'label': date(year, month, 1).strftime('%b'),
+            'name': date(year, month, 1).strftime('%B'),
+            'total_seconds': total,
+            # Days actually worked, not days in the month — the honest
+            # denominator for "how much on a working day".
+            'worked_days': sum(1 for seconds in days.values() if seconds > 0),
+            'average_seconds': total // max(sum(1 for s in days.values() if s > 0), 1),
+            'activity_percent': round(100 * active / tracked) if tracked else None,
+            'is_current': year == today.year and month == today.month,
+            'is_future': date(year, month, 1) > today.replace(day=1),
+        })
+    return months
+
+
+def _activity_by_month(db, user, first_day, last_day):
+    """{month: (active_minutes, tracked_minutes)} across a local-day range.
+
+    One query for the year. A query per month would be twelve round trips for
+    a page somebody opens to glance at.
+    """
+    window_start, window_end = range_window(user, first_day, last_day)
+    tz = user_tz(user)
+    rows = (db.query(ActivityWindow)
+            .filter(ActivityWindow.user_id == user.id,
+                    ActivityWindow.started_at < window_end,
+                    ActivityWindow.ended_at > window_start)
+            .all())
+
+    by_month = {}
+    for row in rows:
+        # The month it began in, locally. A window straddling a month boundary
+        # is ten minutes long; splitting it would be precision nobody can use.
+        month = row.started_at.astimezone(tz).month
+        active, tracked = by_month.get(month, (0, 0))
+        by_month[month] = (active + row.active_minutes,
+                           tracked + row.tracked_minutes)
+    return by_month
+
+
+def year_summary(db, user, year, now=None):
+    """The twelve months, plus what a person reads first."""
+    months = monthly_totals(db, user, year, now=now)
+    real = [m for m in months if m['total_seconds'] > 0]
+    total = sum(m['total_seconds'] for m in months)
+    return {
+        'year': year,
+        'months': months,
+        'total_seconds': total,
+        'worked_days': sum(m['worked_days'] for m in months),
+        'best_month': max(real, key=lambda m: m['total_seconds']) if real else None,
+        'average_seconds': total // len(real) if real else 0,
+    }
+
+
 def current_status(db, user, now=None):
     """What the dashboard shows at the top: are they working right now."""
     now = now or datetime.now(UTC)

@@ -35,7 +35,8 @@ from app.services import activity_log as AL
 from app.services import alerts as agent_alerts
 from app.services import reporting as R
 from app.services.mail import NotConfigured
-from app.services.sessions import close_orphaned_sessions
+from app.services.sessions import (close_orphaned_sessions,
+                                   close_sessions_paused_overnight)
 
 logger = logging.getLogger('worker')
 UTC = timezone.utc
@@ -78,8 +79,18 @@ def run_reports(now=None):
 
 
 def run_orphans(now=None):
+    """Two different endings, both idempotent.
+
+    An orphan is a session whose agent died — capped at its last heartbeat. An
+    overnight pause is a session whose agent is alive and whose person is not —
+    ended where input stopped, once their day has rolled over. Neither selects
+    a session the other has already closed, because a closed session is not
+    open.
+    """
     with session_scope() as db:
-        return close_orphaned_sessions(db, now=now)
+        capped = close_orphaned_sessions(db, now=now)
+        overnight = close_sessions_paused_overnight(db, active_users(db), now=now)
+        return capped + overnight
 
 
 def run_alerts(now=None):

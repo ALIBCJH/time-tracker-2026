@@ -137,10 +137,14 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] J8  A pause waits indefinitely — no maximum, no guessing
 - [x] J9  A suspend of any length pauses; there is one rule, not a threshold
 - [x] J10 A session paused when it was capped raises no I2 alert
+- [x] J11 A pause survives the agent restarting — the mark is settled at boot
+- [x] J12 The dashboard shows paused as its own state, not as tracking
+- [x] J13 The session figure on screen is tracked time, so it agrees with the day
+- [x] J14 A session paused since before today began is closed where input stopped
 
 ---
 
-All 97 done. What is deliberately NOT here, and why:
+All 101 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

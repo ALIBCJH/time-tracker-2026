@@ -69,3 +69,55 @@ def close_orphaned_sessions(db, now=None, silence=SILENCE_BEFORE_ORPHANED, user_
     if closed:
         db.commit()
     return closed
+
+
+def close_sessions_paused_overnight(db, users, now=None):
+    """End a session nobody came back to before their day rolled over.
+
+    A pause waits indefinitely, which is the right rule while somebody might
+    walk back in and is the wrong one for ever: a laptop left running would
+    keep Monday's session open on Wednesday. The numbers would stay correct —
+    the idle is subtracted either way — but "session" would stop meaning
+    anything, and a history of one item three days long is not a history.
+
+    The test is deliberately not a guess about the person. It asks whether the
+    pause began before the local day they are now in, using the same day
+    boundary every report already uses. Somebody genuinely working at half past
+    midnight is not paused, so nothing here touches them; their session runs on
+    and the reports split it at the boundary as they always have.
+
+    The session ends where input stopped, never at the boundary and never at
+    now. The hours in between were already excluded as idle, and moving the end
+    forward would either credit them or leave a gap nothing accounts for.
+    """
+    now = now or datetime.now(timezone.utc)
+    closed = []
+
+    for user in users:
+        # Imported here rather than at module scope: reporting imports models,
+        # and a top-level import each way is a cycle.
+        from app.services.reporting import day_window, logical_today
+
+        day_start, _ = day_window(user, logical_today(user, now))
+        sessions = (db.query(Session)
+                    .filter(Session.user_id == user.id,
+                            Session.ended_at.is_(None),
+                            Session.idle_since.isnot(None),
+                            Session.idle_since < day_start)
+                    .all())
+        for session in sessions:
+            session.ended_at = session.idle_since
+            closed.append({
+                'id': session.id,
+                'user_id': session.user_id,
+                'project': session.project,
+                'ended_at': session.idle_since,
+            })
+            logger.info(
+                f"Closed #{session.id} ('{session.project}') at "
+                f"{session.idle_since.isoformat(timespec='seconds')} — paused "
+                f"since before {user.email}'s day began")
+
+    if closed:
+        db.commit()
+    return closed

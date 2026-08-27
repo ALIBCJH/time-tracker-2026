@@ -27,9 +27,14 @@
         {% endif %}
       </form>
     {% endif %}
-    <div id="live" class="pill {{ 'on' if status.is_tracking else '' }}">
-      {% if status.is_tracking %}
-        <span class="dot"></span> {{ status.project }} · {{ hm(status.elapsed_seconds) }}
+    {#- Three states, not two. A paused session is running and not counting,
+        and showing it as either "tracking" or "not tracking" is a lie. -#}
+    <div id="live" class="pill {{ 'paused' if status.is_paused else ('on' if status.is_tracking else '') }}">
+      {% if status.is_paused %}
+        <span class="dot"></span> Paused · {{ status.project }}
+        <span class="sub">idle {{ hm(status.paused_seconds) }}</span>
+      {% elif status.is_tracking %}
+        <span class="dot"></span> {{ status.project }} · {{ hm(status.tracked_seconds) }}
       {% else %}Not tracking{% endif %}
     </div>
     </div>
@@ -93,11 +98,25 @@
       if (!r.ok) return;
       const s = await r.json();
       const el = document.getElementById('live');
-      el.className = 'pill' + (s.is_tracking ? ' on' : '');
-      el.innerHTML = s.is_tracking
-        ? '<span class="dot"></span> ' + s.project + ' · ' + fmt(s.elapsed_seconds)
-        : 'Not tracking';
+      el.className = 'pill' + (s.is_paused ? ' paused' : (s.is_tracking ? ' on' : ''));
+      if (s.is_paused) {
+        el.innerHTML = '<span class="dot"></span> Paused · ' + esc(s.project)
+          + ' <span class="sub">idle ' + fmt(s.paused_seconds) + '</span>';
+      } else if (s.is_tracking) {
+        // The tracked figure, not the wall clock: it has to agree with the
+        // day total above it, and the wall clock stopped doing that the day
+        // sessions learned to pause.
+        el.innerHTML = '<span class="dot"></span> ' + esc(s.project)
+          + ' · ' + fmt(s.tracked_seconds);
+      } else {
+        el.textContent = 'Not tracking';
+      }
     } catch (e) { /* offline: leave the last known state on screen */ }
+  }
+  // Project names are user input and land in innerHTML above.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
   }
   function fmt(s) {
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);

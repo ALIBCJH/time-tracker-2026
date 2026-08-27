@@ -69,7 +69,10 @@ def test_the_status_endpoint_reports_tracking(client, db, worker, password):
     sign_in(client, 'worker@example.com', password)
     body = client.get('/api/status').get_json()
     assert body['is_tracking'] and body['project'] == 'Live'
-    assert 3500 < body['elapsed_seconds'] < 3700
+    assert body['is_paused'] is False
+    # tracked, not wall clock: with no breaks they are the same number, and
+    # once there are breaks this is the one that agrees with the day total.
+    assert 3500 < body['tracked_seconds'] < 3700
 
 
 # ── A worker cannot see anyone else ──────────────────────────────────────────

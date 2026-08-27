@@ -198,6 +198,127 @@ def test_project_totals_subtract_breaks_too(db, user):
     assert sum(rows.values()) == hours(db, user)
 
 
+# ── What the page shows ─────────────────────────────────────────────────────
+
+def test_the_session_figure_agrees_with_the_day_total(db, user):
+    """The pill used to show wall clock since the session opened. Once a
+    session can pause, that overstates by the length of every break, and a page
+    whose two numbers disagree is worse than one that shows fewer."""
+    s = session(db, user, at(9), None)
+    break_(db, user, at(12), at(13))
+    status = R.current_status(db, user, now=at(15))
+
+    assert status['tracked_seconds'] == 5 * 3600      # nine to three, less lunch
+    assert status['elapsed_seconds'] == 6 * 3600      # wall clock, still available
+    assert status['tracked_seconds'] == hours(db, user, now=at(15))
+
+
+def test_a_paused_session_reports_how_long_it_has_been_idle(db, user):
+    session(db, user, at(9), None, idle_since=at(12))
+    status = R.current_status(db, user, now=at(13, 30))
+    assert status['is_paused'] is True
+    assert status['paused_seconds'] == 90 * 60
+
+
+def test_nothing_is_paused_when_nothing_is_running(db, user):
+    status = R.current_status(db, user, now=at(13))
+    assert status['is_tracking'] is False
+    assert status['is_paused'] is False
+    assert status['tracked_seconds'] == 0
+    assert status['paused_seconds'] == 0
+
+
+# ── The day rolling over ────────────────────────────────────────────────────
+
+def yesterday(hh, mm=0):
+    return datetime(2026, 8, 26, hh, mm, tzinfo=NAIROBI).astimezone(UTC)
+
+
+def test_a_session_paused_since_yesterday_is_closed(db, user):
+    """A laptop left running. Without this, Monday's session is still open on
+    Wednesday and the history is one item three days long."""
+    from app.services.sessions import close_sessions_paused_overnight
+
+    s = session(db, user, yesterday(9), None, idle_since=yesterday(17))
+    closed = close_sessions_paused_overnight(db, [user], now=at(10))
+
+    assert len(closed) == 1
+    db.expire_all()
+    assert db.get(Session, s.id).ended_at == yesterday(17)
+
+
+def test_it_ends_where_input_stopped_not_at_the_boundary(db, user):
+    """The hours in between were already excluded as idle. Moving the end
+    forward would either credit them or leave a gap nothing accounts for."""
+    from app.services.sessions import close_sessions_paused_overnight
+
+    session(db, user, yesterday(9), None, idle_since=yesterday(17))
+    closed = close_sessions_paused_overnight(db, [user], now=at(10))
+    assert closed[0]['ended_at'] == yesterday(17)
+
+
+def test_a_session_paused_earlier_today_is_left_alone(db, user):
+    """They may still walk back in. The pause waits, as it is meant to."""
+    from app.services.sessions import close_sessions_paused_overnight
+
+    session(db, user, at(9), None, idle_since=at(12))
+    assert close_sessions_paused_overnight(db, [user], now=at(14)) == []
+
+
+def test_somebody_working_past_midnight_is_not_touched(db, user):
+    """Not paused, so not a candidate — whatever the clock says. This is why
+    the test is the pause mark and not the hour."""
+    from app.services.sessions import close_sessions_paused_overnight
+
+    s = session(db, user, yesterday(22), None)
+    assert close_sessions_paused_overnight(db, [user], now=at(0, 30)) == []
+    db.expire_all()
+    assert db.get(Session, s.id).ended_at is None
+
+
+def test_closing_it_does_not_change_the_totals(db, user):
+    """The idle was already subtracted. Ending the session where the pause
+    began must move no minutes between days."""
+    from app.services.sessions import close_sessions_paused_overnight
+
+    session(db, user, yesterday(9), None, idle_since=yesterday(17))
+    break_(db, user, yesterday(17), yesterday(23))
+    before = R.daily_totals(db, user, date(2026, 8, 26), date(2026, 8, 27),
+                            now=at(10))
+    close_sessions_paused_overnight(db, [user], now=at(10))
+    after = R.daily_totals(db, user, date(2026, 8, 26), date(2026, 8, 27),
+                           now=at(10))
+    assert before == after
+    assert after[date(2026, 8, 26)] == 8 * 3600
+
+
+def test_running_it_twice_closes_nothing_the_second_time(db, user):
+    from app.services.sessions import close_sessions_paused_overnight
+
+    session(db, user, yesterday(9), None, idle_since=yesterday(17))
+    assert len(close_sessions_paused_overnight(db, [user], now=at(10))) == 1
+    assert close_sessions_paused_overnight(db, [user], now=at(10)) == []
+
+
+def test_each_person_gets_their_own_midnight(db, user, password):
+    """An admin in another zone must not close somebody's session because it
+    is tomorrow where the server is."""
+    from app.services.sessions import close_sessions_paused_overnight
+    from app.services.users import create_user
+
+    honolulu = create_user(db, 'hi@example.com', 'Honolulu', password,
+                           timezone_name='Pacific/Honolulu')
+    # 01:00 in Nairobi on the 27th is still 12:00 on the 26th in Honolulu.
+    paused_at = datetime(2026, 8, 26, 9, 0, tzinfo=ZoneInfo('Pacific/Honolulu'))
+    s = session(db, honolulu, paused_at - timedelta(hours=2), None,
+                idle_since=paused_at)
+
+    now = datetime(2026, 8, 27, 1, 0, tzinfo=NAIROBI).astimezone(UTC)
+    assert close_sessions_paused_overnight(db, [honolulu], now=now) == []
+    db.expire_all()
+    assert db.get(Session, s.id).ended_at is None
+
+
 # ── The settings that drive it ───────────────────────────────────────────────
 
 def test_the_pause_threshold_defaults_to_fifteen_minutes(db, user):

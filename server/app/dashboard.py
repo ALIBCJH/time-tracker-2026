@@ -119,8 +119,13 @@ def api_status():
     status = R.current_status(db_session, user, now)
     return jsonify({
         'is_tracking': status['is_tracking'],
+        # A paused session is still running; it is simply not counting. The
+        # page has to be able to say that, or it shows a live green pill and a
+        # climbing number while somebody is away from the machine.
+        'is_paused': status['is_paused'],
+        'paused_seconds': status['paused_seconds'],
         'project': status['project'],
-        'elapsed_seconds': status['elapsed_seconds'],
+        'tracked_seconds': status['tracked_seconds'],
         'today_seconds': R.day_summary(db_session, user, now=now)['total_seconds'],
         'server_time': now.isoformat(),
     })

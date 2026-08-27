@@ -189,6 +189,21 @@ def project_totals(db, user, first_day, last_day, now=None):
             for p, s in sorted(totals.items(), key=lambda kv: -kv[1])]
 
 
+def session_tracked_seconds(db, user, session, now=None):
+    """What this session has actually counted, breaks removed.
+
+    Not the wall clock since it opened. Once a session can pause, the two
+    diverge by the length of every break, and showing the wall clock next to a
+    day total that excludes them makes the page contradict itself.
+    """
+    now = now or datetime.now(UTC)
+    start, end = _span(session, now)
+    if end <= start:
+        return 0
+    idles = _idle_intervals(db, user, start, end)
+    return sum(int((b - a).total_seconds()) for a, b in _minus_idle(start, end, idles))
+
+
 def current_status(db, user, now=None):
     """What the dashboard shows at the top: are they working right now."""
     now = now or datetime.now(UTC)
@@ -204,11 +219,16 @@ def current_status(db, user, now=None):
         'project': open_session.project if open_session else None,
         'task': open_session.task if open_session else None,
         'started_at': open_session.started_at if open_session else None,
-        # Wall-clock since the session opened. Not the tracked total: this one
-        # includes the breaks, which is why the dashboard shows the day total
-        # from daily_totals rather than this.
+        # Wall clock since the session opened — kept because "running since
+        # 09:00" is a different and still useful fact.
         'elapsed_seconds': (int((now - open_session.started_at).total_seconds())
                             if open_session else 0),
+        # What it has actually counted. This is the one to put on screen next
+        # to a day total, because it is measured the same way.
+        'tracked_seconds': (session_tracked_seconds(db, user, open_session, now)
+                            if open_session else 0),
+        'paused_seconds': (int((now - paused_since).total_seconds())
+                           if paused_since else 0),
         'last_heartbeat_at': open_session.last_heartbeat_at if open_session else None,
     }
 

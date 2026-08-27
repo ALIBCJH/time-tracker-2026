@@ -21,7 +21,7 @@ UTC = timezone.utc
 
 # Bumped whenever what is collected changes. A new version means everyone is
 # asked again rather than silently inheriting an agreement to something else.
-POLICY_VERSION = '2026-08-1'
+POLICY_VERSION = '2026-08-2'
 
 # What the policy version above actually covers. Kept next to the version so
 # the two cannot drift, and rendered on the consent page verbatim.
@@ -34,8 +34,14 @@ COLLECTED = [
      'session is running and you are not idle. A sound plays each time. Full '
      'images are deleted after 30 days; thumbnails after a year.'),
     ('When you are idle',
-     'Time with no keyboard or mouse input. Used to stop sessions, not to '
+     'Time with no keyboard or mouse input. Used to pause sessions, not to '
      'measure how long you were away from your desk.'),
+    ('How active each ten minutes was',
+     'For each ten-minute slice, how many of its minutes had any keyboard or '
+     'mouse input — shown as a percentage beside each screen capture. What you '
+     'typed is never recorded, only that something was pressed. It is reported '
+     'and never subtracted from your hours: reading and phone calls are work, '
+     'and both look like 0%.'),
     ('A daily note you write yourself',
      'Optional, and yours. Nothing writes it for you.'),
 ]

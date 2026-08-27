@@ -25,6 +25,7 @@ SUSPEND_GAP_FACTOR = 3       # a loop gap this many polls long means the box fro
 MIN_SPAN_SECONDS = 5         # shorter than this is a window flicker, not usage
 HEARTBEAT_INTERVAL = 60      # how often an open session is re-marked alive
 IDLE_THRESHOLD = 900         # 15 minutes of no input and the session pauses
+ACTIVITY_WINDOW = 600        # the slice an activity percentage describes
 
 
 def _now():
@@ -34,6 +35,7 @@ def _now():
 class ActivityMonitor:
     def __init__(self, spool, idle_source, window_source=None,
                  idle_threshold=IDLE_THRESHOLD, poll_interval=POLL_INTERVAL,
+                 activity_window=ACTIVITY_WINDOW,
                  suspend_factor=SUSPEND_GAP_FACTOR,
                  min_span=MIN_SPAN_SECONDS,
                  heartbeat_interval=HEARTBEAT_INTERVAL,
@@ -56,6 +58,14 @@ class ActivityMonitor:
         self._app = self._title = self._app_started = None
         self._idle_started = None
         self._idle_uuid = None              # the break currently on record
+        self.activity_window = activity_window
+        # Minutes, not polls. A minute counts as active if ANY poll inside it
+        # saw input, which is the difference between measuring work and
+        # measuring typing speed: reading a paragraph between keystrokes is
+        # work, and a per-poll count would score it as absence.
+        self._window_start = None
+        self._active_minutes = set()
+        self._tracked_minutes = set()
         self._last_mono = None
         self._last_heartbeat = None
 
@@ -147,6 +157,57 @@ class ActivityMonitor:
         self.is_idle = False
         self._app_started = now
 
+    # ── Activity ─────────────────────────────────────────────────────────────
+
+    def _window_of(self, now):
+        """The clock-aligned slice `now` falls in.
+
+        Aligned to the clock rather than to when tracking started, so two
+        people's windows line up and a screenshot can be matched to one by its
+        timestamp alone.
+        """
+        epoch = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elapsed = int((now - epoch).total_seconds())
+        return epoch + timedelta(seconds=elapsed - elapsed % self.activity_window)
+
+    def _note_activity(self, now, saw_input, tracking):
+        """Fold one poll into the window it belongs to, closing the last one
+        if the clock has moved past it."""
+        window = self._window_of(now)
+        if self._window_start is not None and window != self._window_start:
+            self._close_window(now)
+        self._window_start = window
+
+        if tracking:
+            minute = now.replace(second=0, microsecond=0)
+            self._tracked_minutes.add(minute)
+            if saw_input:
+                self._active_minutes.add(minute)
+
+    def _close_window(self, now):
+        """Bank the finished window. Silent if nothing was tracked in it —
+        a window with no session behind it is not evidence of anything."""
+        if self._window_start is None or not self._tracked_minutes:
+            self._reset_window()
+            return None
+
+        session = self.spool.open_session()
+        client_uuid = self.spool.record_activity_window(
+            self._window_start.isoformat(),
+            (self._window_start + timedelta(seconds=self.activity_window)).isoformat(),
+            len(self._active_minutes), len(self._tracked_minutes),
+            session['client_uuid'] if session else None)
+        logger.debug(
+            f'Activity {len(self._active_minutes)}/{len(self._tracked_minutes)} '
+            f'min from {self._window_start.isoformat(timespec="minutes")}')
+        self._reset_window()
+        return client_uuid
+
+    def _reset_window(self):
+        self._window_start = None
+        self._active_minutes = set()
+        self._tracked_minutes = set()
+
     # ── One step ─────────────────────────────────────────────────────────────
 
     def tick(self, now=None, mono=None):
@@ -167,6 +228,9 @@ class ActivityMonitor:
                 events.append('paused')
                 logger.info('Tracking paused — session closed')
             self._last_mono = mono
+            # Tracking is off, so nothing is being measured — close whatever
+            # window was open rather than letting it span the gap.
+            self._close_window(now)
             return {'idle_seconds': 0.0, 'is_idle': self.is_idle,
                     'paused': True, 'events': events}
 
@@ -204,6 +268,16 @@ class ActivityMonitor:
         else:
             events += self._sample_window(now)
             self._maybe_heartbeat(now)
+
+        # How much of this window had a person in it. `idle_for` is seconds
+        # since the last input, so anything smaller than the gap since the last
+        # poll means input landed inside it — no new permission, no record of
+        # WHAT was pressed, just that something was.
+        gap_seconds = self.poll_interval if gap is None else max(gap, 0.0)
+        saw_input = idle_for < max(gap_seconds, 1.0)
+        self._note_activity(now, saw_input,
+                            tracking=not self.is_idle and self.spool.open_session()
+                            is not None)
 
         return {'idle_seconds': idle_for, 'is_idle': self.is_idle,
                 'paused': False, 'events': events}
@@ -257,5 +331,7 @@ class ActivityMonitor:
     def stop(self):
         self._running = False
         # Bank whatever is in flight so a clean shutdown does not lose the last
-        # span the way a crash would.
-        self._flush_span(_now())
+        # span — or the last activity window — the way a crash would.
+        now = _now()
+        self._flush_span(now)
+        self._close_window(now)

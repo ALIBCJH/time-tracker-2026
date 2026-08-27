@@ -296,6 +296,56 @@ class IdlePeriod(Base):
     )
 
 
+class ActivityWindow(Base):
+    """How much of a ten-minute slice had a person in it.
+
+    The tracker credits time for a session being open and not idle, and that is
+    a measure of presence rather than of work: one keystroke every fourteen
+    minutes keeps the idle counter below its threshold all day. This is the
+    second number that makes the difference visible — a real morning runs
+    around 60-70%, and a keyboard tapped to stay under the threshold runs under
+    10%.
+
+    Both halves are stored rather than the ratio. A window the session only
+    half covered — somebody started at 09:07 — is weaker evidence than a full
+    one, and a stored percentage cannot say which it was.
+
+    What is recorded is that input happened in a given minute, never what was
+    pressed. The agent reads the same idle counter it already uses to decide
+    when to pause; nothing new is watched.
+    """
+    __tablename__ = 'activity_windows'
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    client_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey('sessions.id', ondelete='SET NULL'))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    active_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tracked_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    @property
+    def percent(self):
+        """None rather than zero when nothing was tracked: "no data" and "did
+        nothing" are different answers and must not render the same."""
+        if not self.tracked_minutes:
+            return None
+        return round(100 * self.active_minutes / self.tracked_minutes)
+
+    __table_args__ = (
+        Index('ix_activity_user_started', 'user_id', 'started_at'),
+        UniqueConstraint('user_id', 'client_uuid', name='uq_activity_client_uuid'),
+        CheckConstraint('active_minutes >= 0 AND tracked_minutes >= 0',
+                        name='ck_activity_non_negative'),
+        CheckConstraint('active_minutes <= tracked_minutes',
+                        name='ck_activity_within_tracked'),
+    )
+
+
 class Screenshot(Base):
     """A capture. The image lives in object storage; this row is the index.
 

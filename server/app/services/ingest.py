@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.models import AppUsage, IdlePeriod, Session
+from app.models import ActivityWindow, AppUsage, IdlePeriod, Session
 
 # A cap so a broken or hostile agent cannot ask the server to chew through an
 # unbounded batch in one transaction.
@@ -78,6 +78,21 @@ def text_field(value, field, limit, *, required=False):
     if required and not value:
         raise RecordError(f'{field} is required')
     return value[:limit]
+
+
+def count_field(value, field, *, limit=10_000):
+    """A non-negative whole number, or the record is refused.
+
+    Bools are rejected explicitly: in Python True is an int, and a payload with
+    active_minutes=true would otherwise be quietly stored as one minute.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RecordError(f'{field} must be a whole number')
+    if value < 0:
+        raise RecordError(f'{field} cannot be negative')
+    if value > limit:
+        raise RecordError(f'{field} is implausibly large')
+    return value
 
 
 def _span(record, now):
@@ -163,6 +178,30 @@ def _upsert_idle(db, user, record, now):
     db.execute(stmt.on_conflict_do_nothing(constraint='uq_idle_client_uuid'))
 
 
+def _upsert_activity(db, user, record, now, session_ids):
+    """One finished activity window.
+
+    The two counts are validated against each other here rather than trusted:
+    the agent computes them, the agent runs on somebody's own machine, and a
+    window claiming more active minutes than tracked ones would quietly turn
+    into an activity figure above 100%.
+    """
+    started, ended, _ = _span(record, now)
+    active = count_field(record.get('active_minutes'), 'active_minutes')
+    tracked = count_field(record.get('tracked_minutes'), 'tracked_minutes')
+    if active > tracked:
+        raise RecordError('active_minutes cannot exceed tracked_minutes')
+
+    ref = record.get('session_client_uuid')
+    stmt = insert(ActivityWindow).values(
+        user_id=user.id,
+        client_uuid=parse_uuid(record.get('client_uuid'), 'client_uuid'),
+        session_id=session_ids.get(str(ref)) if ref else None,
+        started_at=started, ended_at=ended,
+        active_minutes=active, tracked_minutes=tracked)
+    db.execute(stmt.on_conflict_do_nothing(constraint='uq_activity_client_uuid'))
+
+
 # ── The batch ────────────────────────────────────────────────────────────────
 
 def ingest_batch(db, user, payload, now=None):
@@ -174,7 +213,8 @@ def ingest_batch(db, user, payload, now=None):
     happened either way and unattributed time still counts.
     """
     now = now or datetime.now(timezone.utc)
-    accepted = {'sessions': 0, 'app_usage': 0, 'idle_periods': 0}
+    accepted = {'sessions': 0, 'app_usage': 0, 'idle_periods': 0,
+                'activity_windows': 0}
     rejected = []
 
     def run(kind, records, apply):
@@ -209,7 +249,9 @@ def ingest_batch(db, user, payload, now=None):
 
     # Map the client's session ids to ours, for this user only.
     session_ids = {}
-    refs = {str(r.get('session_client_uuid')) for r in payload.get('app_usage', []) or []
+    refs = {str(r.get('session_client_uuid'))
+            for group in ('app_usage', 'activity_windows')
+            for r in payload.get(group, []) or []
             if isinstance(r, dict) and r.get('session_client_uuid')}
     if refs:
         valid = []
@@ -227,6 +269,8 @@ def ingest_batch(db, user, payload, now=None):
         lambda r: _upsert_app_usage(db, user, r, now, session_ids))
     run('idle_periods', payload.get('idle_periods', []),
         lambda r: _upsert_idle(db, user, r, now))
+    run('activity_windows', payload.get('activity_windows', []),
+        lambda r: _upsert_activity(db, user, r, now, session_ids))
 
     db.commit()
     return {'accepted': accepted, 'rejected': rejected}

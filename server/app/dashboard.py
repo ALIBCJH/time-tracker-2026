@@ -239,6 +239,9 @@ def screenshots():
 
     store = current_app.storage
     tz = R.user_tz(user)
+    # One query for the page, not one per thumbnail.
+    activity = R.activity_for_instants(db_session, user,
+                                       [s.captured_at for s in shots])
     items = []
     for shot in shots:
         # An expired full frame is reported as expired rather than rendered as
@@ -249,9 +252,15 @@ def screenshots():
             'thumb': store.signed_url(shot.thumb_key) if shot.thumb_key else None,
             'full': None if expired else store.signed_url(shot.full_key),
             'expired': expired,
+            # How much of the ten minutes around this frame had input in it.
+            # None where the agent predates activity tracking — shown as "—"
+            # rather than as zero, which would read as an accusation.
+            'activity': activity.get(shot.captured_at),
         })
 
     return render_template('screenshots.html', subject=user, day=day, items=items,
+                           day_activity=R.activity_summary(db_session, user, day, day,
+                                                           now=now),
                            viewing_other=user.id != current_user.id,
                            prev_day=day - timedelta(days=1),
                            next_day=day + timedelta(days=1))

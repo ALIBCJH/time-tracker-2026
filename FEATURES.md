@@ -142,9 +142,23 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] J13 The session figure on screen is tracked time, so it agrees with the day
 - [x] J14 A session paused since before today began is closed where input stopped
 
+## K. Activity, so that time credited is time worked — all NEW
+
+- [x] K1  Per-minute activity from the idle counter already polled — no new access
+- [x] K2  A minute counts if ANY input landed in it, so reading is not absence
+- [x] K3  Ten-minute windows, clock-aligned, so a capture matches one by time
+- [x] K4  Active AND tracked minutes stored — a half-covered window says so
+- [x] K5  A percentage under every screenshot, and for the day
+- [x] K6  Activity on the weekly report
+- [x] K7  Server refuses a window claiming more active minutes than tracked
+- [x] K8  Never subtracted from hours — reading and calls are work at 0%
+- [x] K9  "Not measured" renders as a dash, never as 0%
+- [x] K10 Screenshot timing jittered ±35%, so the schedule cannot be worked around
+- [x] K11 Consent version bumped — everyone is asked again
+
 ---
 
-All 101 done. What is deliberately NOT here, and why:
+All 112 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

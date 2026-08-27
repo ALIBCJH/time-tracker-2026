@@ -14,7 +14,7 @@ move hours between days for anyone who works late.
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.models import IdlePeriod, Session
+from app.models import ActivityWindow, IdlePeriod, Session
 
 UTC = timezone.utc
 
@@ -202,6 +202,56 @@ def session_tracked_seconds(db, user, session, now=None):
         return 0
     idles = _idle_intervals(db, user, start, end)
     return sum(int((b - a).total_seconds()) for a, b in _minus_idle(start, end, idles))
+
+
+def activity_summary(db, user, first_day, last_day, now=None):
+    """How much of the tracked time over a range had a person in it.
+
+    Deliberately a ratio of totals rather than an average of percentages: a
+    window covering two minutes and one covering ten are not equal evidence,
+    and averaging them lets a sliver of a window swing the day.
+
+    percent is None when nothing was tracked. "No data" and "did nothing" are
+    different answers, and a page that renders them both as 0% is lying about
+    one of them.
+    """
+    window_start, window_end = range_window(user, first_day, last_day)
+    rows = (db.query(ActivityWindow)
+            .filter(ActivityWindow.user_id == user.id,
+                    ActivityWindow.started_at < window_end,
+                    ActivityWindow.ended_at > window_start)
+            .all())
+    active = sum(r.active_minutes for r in rows)
+    tracked = sum(r.tracked_minutes for r in rows)
+    return {
+        'active_minutes': active,
+        'tracked_minutes': tracked,
+        'percent': round(100 * active / tracked) if tracked else None,
+        'windows': len(rows),
+    }
+
+
+def activity_for_instants(db, user, instants):
+    """{instant: percent} for the window each instant falls in.
+
+    One query for a whole gallery page rather than one per thumbnail — a
+    screenshot page is twenty or more images and a query each would be the
+    slowest page in the app.
+    """
+    if not instants:
+        return {}
+    rows = (db.query(ActivityWindow)
+            .filter(ActivityWindow.user_id == user.id,
+                    ActivityWindow.started_at <= max(instants),
+                    ActivityWindow.ended_at > min(instants))
+            .all())
+    found = {}
+    for instant in instants:
+        for row in rows:
+            if row.started_at <= instant < row.ended_at:
+                found[instant] = row.percent
+                break
+    return found
 
 
 def current_status(db, user, now=None):

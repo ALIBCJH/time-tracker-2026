@@ -269,3 +269,91 @@ def test_a_malformed_pause_mark_is_refused(agent, db):
     response = agent({'sessions': [a_session(idle_since='the day before')]})
     assert response.status_code == 200
     assert response.get_json()['rejected']
+
+
+# ── Activity windows ─────────────────────────────────────────────────────────
+
+def a_window(client_uuid=None, **over):
+    record = {'client_uuid': str(client_uuid or uuid.uuid4()),
+              'started_at': iso(T0), 'ended_at': iso(T0 + timedelta(minutes=10)),
+              'active_minutes': 7, 'tracked_minutes': 10}
+    record.update(over)
+    return record
+
+
+def test_an_activity_window_is_stored(agent, db):
+    from app.models import ActivityWindow
+
+    agent({'activity_windows': [a_window()]})
+    row = db.query(ActivityWindow).one()
+    assert (row.active_minutes, row.tracked_minutes) == (7, 10)
+    assert row.percent == 70
+
+
+def test_a_window_claiming_more_active_than_tracked_is_refused(agent, db):
+    """The agent computes these on a machine its owner controls. Trusting the
+    pair would let an activity figure above 100% into the database."""
+    from app.models import ActivityWindow
+
+    response = agent({'activity_windows': [a_window(active_minutes=11)]})
+    assert response.get_json()['rejected']
+    assert db.query(ActivityWindow).count() == 0
+
+
+def test_a_negative_count_is_refused(agent, db):
+    from app.models import ActivityWindow
+
+    assert agent({'activity_windows': [a_window(active_minutes=-1)]}).get_json()['rejected']
+    assert db.query(ActivityWindow).count() == 0
+
+
+def test_a_non_numeric_count_is_refused(agent, db):
+    assert agent({'activity_windows': [a_window(tracked_minutes='lots')]}).get_json()['rejected']
+
+
+def test_true_is_not_a_number_of_minutes(agent, db):
+    """In Python True is an int, so an unguarded check would store it as one
+    minute rather than refusing the record."""
+    assert agent({'activity_windows': [a_window(active_minutes=True)]}).get_json()['rejected']
+
+
+def test_an_implausible_count_is_refused(agent, db):
+    assert agent({'activity_windows': [a_window(tracked_minutes=999999,
+                                                active_minutes=999999)]}).get_json()['rejected']
+
+
+def test_resending_a_window_does_not_duplicate_it(agent, db):
+    from app.models import ActivityWindow
+
+    cu = uuid.uuid4()
+    agent({'activity_windows': [a_window(cu)]})
+    agent({'activity_windows': [a_window(cu)]})
+    assert db.query(ActivityWindow).count() == 1
+
+
+def test_a_window_is_attached_to_its_session(agent, db):
+    from app.models import ActivityWindow, Session
+
+    session_cu = uuid.uuid4()
+    agent({'sessions': [a_session(session_cu)],
+           'activity_windows': [a_window(session_client_uuid=str(session_cu))]})
+    session = db.query(Session).filter_by(client_uuid=session_cu).one()
+    assert db.query(ActivityWindow).one().session_id == session.id
+
+
+def test_a_window_for_an_unknown_session_is_still_kept(agent, db):
+    """The minutes happened either way. Unattributed evidence still counts."""
+    from app.models import ActivityWindow
+
+    agent({'activity_windows': [a_window(session_client_uuid=str(uuid.uuid4()))]})
+    assert db.query(ActivityWindow).one().session_id is None
+
+
+def test_a_bad_window_does_not_cost_the_rest_of_the_batch(agent, db):
+    from app.models import ActivityWindow
+
+    response = agent({'activity_windows': [a_window(active_minutes=11), a_window()]})
+    body = response.get_json()
+    assert body['accepted']['activity_windows'] == 1
+    assert len(body['rejected']) == 1
+    assert db.query(ActivityWindow).count() == 1

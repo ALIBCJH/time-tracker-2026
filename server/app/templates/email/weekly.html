@@ -17,6 +17,12 @@
                 hm(r.peak_day.total_seconds) if r.peak_day and r.peak_day.total_seconds else '') }}
       {{ m.stat('Avg per active day', hm(r.average_seconds), divider=True) }}
       {{ m.stat('Days active', r.active_days ~ ' of ' ~ r.total_days, divider=True) }}
+      {#- Reported, never deducted. Reading and calls are work at 0%, so this
+          is context for a person to read, not an adjustment to the hours. -#}
+      {% if r.activity.percent is not none %}
+        {{ m.stat('Active', r.activity.percent ~ '%',
+                  'of tracked minutes had input', divider=True) }}
+      {% endif %}
     </tr></table>
   </td></tr>
 

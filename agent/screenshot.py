@@ -12,6 +12,7 @@ evidence.
 """
 import logging
 import os
+import random
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -107,6 +108,11 @@ def _chime():
         pass
 
 
+# How far either side of the configured interval a capture may land. Enough
+# that the schedule is not predictable, not so much that the cadence changes.
+JITTER = 0.35
+
+
 class ScreenshotService:
     """Captures on an interval, but only while there is something to capture.
 
@@ -116,12 +122,15 @@ class ScreenshotService:
     agreed to be recorded.
     """
 
-    def __init__(self, spool, out_dir, settings, backend=None, clock=None):
+    def __init__(self, spool, out_dir, settings, backend=None, clock=None,
+                 rng=None):
         self.spool = spool
         self.out_dir = out_dir
         self.settings = settings
         self.backend = backend
         self._last = None
+        self._gap = None
+        self._random = rng or random.Random()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def ensure_backend(self):
@@ -136,8 +145,23 @@ class ScreenshotService:
             return False
         if self._last is None:
             return True
-        interval = self.settings.get('screenshot_interval_seconds', 600)
-        return (now - self._last).total_seconds() >= interval
+        return (now - self._last).total_seconds() >= self._next_gap()
+
+    def _next_gap(self):
+        """Seconds until the next capture, jittered.
+
+        A fixed interval is a fixed schedule, and a fixed schedule can be
+        worked around: anybody who notices captures land exactly ten minutes
+        apart knows precisely when not to be looking at something else. The gap
+        is drawn once per capture and held, so it varies between captures
+        rather than on every poll — recomputing it each time would make the
+        expected wait drift toward the shortest draw.
+        """
+        if self._gap is None:
+            interval = self.settings.get('screenshot_interval_seconds', 600)
+            self._gap = self._random.uniform(interval * (1 - JITTER),
+                                             interval * (1 + JITTER))
+        return self._gap
 
     def tick(self, is_idle=False, now=None):
         now = now or self._clock()
@@ -149,12 +173,12 @@ class ScreenshotService:
         except (CaptureUnavailable, OSError, ImportError) as e:
             # Never fatal: a machine with no capture tool still tracks time.
             logger.warning(f'Capture skipped: {e}')
-            self._last = now
+            self._last, self._gap = now, None
             return None
 
         session = self.spool.open_session()
         client_uuid = self.spool.record_screenshot(
             captured_at.isoformat(), full, thumb,
             session['client_uuid'] if session else None)
-        self._last = now
+        self._last, self._gap = now, None
         return client_uuid

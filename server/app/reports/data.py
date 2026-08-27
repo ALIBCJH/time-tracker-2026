@@ -152,6 +152,8 @@ def weekly(db, user, monday, now=None):
         'total_days': len(days),
         'peak_day': peak,
         'average_seconds': week['total_seconds'] // active_days if active_days else 0,
+        # Presence is what the hours measure; this is what was in them.
+        'activity': R.activity_summary(db, user, monday, sunday, now=now),
     }
 
 

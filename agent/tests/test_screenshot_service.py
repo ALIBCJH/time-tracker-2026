@@ -81,12 +81,22 @@ def test_a_capture_is_taken_while_actively_working(rig):
 
 
 def test_captures_respect_the_interval(rig):
+    """The interval is now a range rather than a point, so the contract is a
+    floor and a ceiling: never sooner than the shortest possible gap, and
+    always by the longest. Asserting an exact ten minutes would be asserting
+    the predictability the jitter exists to remove."""
+    from screenshot import JITTER
+
     service, spool, fake = rig
     spool.start_session('Alpha')
     service.tick(is_idle=False, now=T0)
-    service.tick(is_idle=False, now=T0 + timedelta(minutes=5))     # too soon
+
+    too_soon = T0 + timedelta(seconds=600 * (1 - JITTER) - 1)
+    service.tick(is_idle=False, now=too_soon)
     assert fake.calls == 1
-    service.tick(is_idle=False, now=T0 + timedelta(minutes=10))
+
+    certainly_due = T0 + timedelta(seconds=600 * (1 + JITTER) + 1)
+    service.tick(is_idle=False, now=certainly_due)
     assert fake.calls == 2
 
 
@@ -175,3 +185,44 @@ def test_backend_detection_creates_its_own_probe_directory(tmp_path, monkeypatch
     missing = tmp_path / 'does' / 'not' / 'exist'
     assert S.detect_backend(str(missing)) is not None
     assert missing.is_dir()
+
+
+# ── Unpredictable timing ─────────────────────────────────────────────────────
+
+def test_captures_do_not_land_on_a_fixed_schedule(tmp_path):
+    """A fixed interval is a fixed schedule, and a fixed schedule can be worked
+    around: captures exactly ten minutes apart tell somebody precisely when not
+    to be looking at something else."""
+    import random
+
+    from screenshot import JITTER
+
+    spool = Spool(str(tmp_path))
+    gaps = set()
+    for seed in range(20):
+        service = ScreenshotService(spool, str(tmp_path / 'shots'), dict(ON),
+                                    backend=['true'], rng=random.Random(seed))
+        gaps.add(round(service._next_gap()))
+    spool.close()
+
+    assert len(gaps) > 10                       # varied, not a constant
+    assert min(gaps) >= round(600 * (1 - JITTER)) - 1
+    assert max(gaps) <= round(600 * (1 + JITTER)) + 1
+
+
+def test_the_gap_is_held_until_the_capture_happens(rig):
+    """Drawn once per capture, not per poll. Re-drawing every poll would make
+    the expected wait drift toward the shortest draw, so captures would creep
+    steadily earlier."""
+    service, spool, fake = rig
+    assert service._next_gap() == service._next_gap() == service._next_gap()
+
+
+def test_a_new_gap_is_drawn_after_each_capture(rig):
+    """Otherwise the first draw would set the cadence for the whole day."""
+    service, spool, fake = rig
+    spool.start_session('Alpha')
+    service.tick(is_idle=False, now=T0)
+    assert service._gap is None                 # cleared, so the next is fresh
+    service._next_gap()
+    assert service._gap is not None

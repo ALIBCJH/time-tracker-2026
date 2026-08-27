@@ -84,13 +84,31 @@ CREATE TABLE IF NOT EXISTS screenshots (
     synced_at           TEXT
 );
 
+CREATE TABLE IF NOT EXISTS activity_windows (
+    client_uuid         TEXT PRIMARY KEY,
+    session_client_uuid TEXT,
+    started_at          TEXT NOT NULL,
+    ended_at            TEXT NOT NULL,
+    -- Minutes in which any input happened, and minutes the session was
+    -- actually running. The percentage is the ratio, and both halves are
+    -- stored rather than the ratio itself: a window the session only half
+    -- covered is not the same evidence as a full one, and a stored percentage
+    -- cannot say which it was.
+    active_minutes      INTEGER NOT NULL DEFAULT 0,
+    tracked_minutes     INTEGER NOT NULL DEFAULT 0,
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    dead                INTEGER NOT NULL DEFAULT 0,
+    synced_at           TEXT
+);
+
 CREATE INDEX IF NOT EXISTS ix_shots_pending    ON screenshots(synced_at, dead);
 CREATE INDEX IF NOT EXISTS ix_sessions_pending ON sessions(dirty, dead);
 CREATE INDEX IF NOT EXISTS ix_usage_pending    ON app_usage(synced_at, dead);
 CREATE INDEX IF NOT EXISTS ix_idle_pending     ON idle_periods(synced_at, dead);
+CREATE INDEX IF NOT EXISTS ix_activity_pending ON activity_windows(synced_at, dead);
 '''
 
-_FINISHED = ('app_usage', 'idle_periods')
+_FINISHED = ('app_usage', 'idle_periods', 'activity_windows')
 
 
 def now_iso():
@@ -227,6 +245,18 @@ class Spool:
             'dead = CASE WHEN attempts + 1 >= ? THEN 1 ELSE 0 END '
             'WHERE client_uuid = ?', (MAX_ATTEMPTS, client_uuid))
 
+    def record_activity_window(self, started_at, ended_at, active_minutes,
+                               tracked_minutes, session_client_uuid=None):
+        """One finished ten-minute window and how much of it had a person in it."""
+        cu = str(uuid.uuid4())
+        self.conn.execute(
+            'INSERT INTO activity_windows (client_uuid, session_client_uuid, '
+            'started_at, ended_at, active_minutes, tracked_minutes) '
+            'VALUES (?,?,?,?,?,?)',
+            (cu, session_client_uuid, started_at, ended_at,
+             int(active_minutes), int(tracked_minutes)))
+        return cu
+
     def record_idle(self, started_at, ended_at):
         """A break that is already over. Uploadable immediately."""
         cu = str(uuid.uuid4())
@@ -294,7 +324,8 @@ class Spool:
         session is re-sent as it changes, and the server's upsert makes each
         resend a no-op or an update rather than a duplicate.
         """
-        batch = {'sessions': [], 'app_usage': [], 'idle_periods': []}
+        batch = {'sessions': [], 'app_usage': [], 'idle_periods': [],
+                 'activity_windows': []}
 
         for r in self.conn.execute(
                 'SELECT * FROM sessions WHERE dirty=1 AND dead=0 '
@@ -321,6 +352,16 @@ class Spool:
             batch['idle_periods'].append({
                 'client_uuid': r['client_uuid'], 'started_at': r['started_at'],
                 'ended_at': r['ended_at']})
+
+        for r in self.conn.execute(
+                'SELECT * FROM activity_windows WHERE synced_at IS NULL AND dead=0 '
+                'ORDER BY started_at LIMIT ?', (limit,)):
+            batch['activity_windows'].append({
+                'client_uuid': r['client_uuid'],
+                'session_client_uuid': r['session_client_uuid'],
+                'started_at': r['started_at'], 'ended_at': r['ended_at'],
+                'active_minutes': r['active_minutes'],
+                'tracked_minutes': r['tracked_minutes']})
 
         return batch
 
@@ -380,6 +421,8 @@ class Spool:
             'pending_sessions': count('sessions', 'dirty=1 AND dead=0'),
             'pending_app_usage': count('app_usage', 'synced_at IS NULL AND dead=0'),
             'pending_idle': count('idle_periods', 'synced_at IS NULL AND dead=0'),
+            'pending_activity': count('activity_windows',
+                                      'synced_at IS NULL AND dead=0'),
             'pending_screenshots': count('screenshots', 'synced_at IS NULL AND dead=0'),
             'dead': sum(count(t, 'dead=1')
                         for t in ('sessions', 'screenshots') + _FINISHED),

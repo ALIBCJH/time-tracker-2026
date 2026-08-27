@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.worker import Worker
+from app.worker import INTERVALS, JOBS, Worker
 
 UTC = timezone.utc
 T0 = datetime(2026, 8, 26, 9, 0, tzinfo=UTC)
@@ -91,3 +91,17 @@ def test_stopping_ends_the_loop(jobs):
     worker = make(jobs)
     worker._stop()
     assert worker._running is False
+
+
+def test_alerts_run_after_orphans(jobs):
+    """A session capped this tick should be reportable in the same tick rather
+    than ten minutes later. tick() iterates the jobs dict, and dict order is
+    insertion order, so this ordering is load-bearing rather than cosmetic."""
+    names = list(JOBS)
+    assert names.index('alerts') > names.index('orphans')
+
+
+def test_every_job_has_an_interval():
+    """A job present in JOBS but missing from INTERVALS raises KeyError inside
+    due() on the first tick, taking the whole worker down at startup."""
+    assert set(JOBS) == set(INTERVALS)

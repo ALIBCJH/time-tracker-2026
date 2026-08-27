@@ -16,7 +16,9 @@ property anyone should have to maintain by hand:
     loses the claim and does not send;
   * closing orphaned sessions is idempotent — a session already capped is not
     open, so it is not selected again;
-  * refreshing a draft rewrites the same row rather than adding one.
+  * refreshing a draft rewrites the same row rather than adding one;
+  * an alert about a dead agent is claimed the same way a report is, so the
+    second worker to notice the same dead agent does not send a second email.
 
 That means a deploy that briefly runs two workers, or a forgotten container on
 another host, degrades to wasted CPU rather than duplicate mail.
@@ -30,6 +32,7 @@ from app.db import session_scope
 from app.models import User
 from app.reports import send as reports
 from app.services import activity_log as AL
+from app.services import alerts as agent_alerts
 from app.services import reporting as R
 from app.services.mail import NotConfigured
 from app.services.sessions import close_orphaned_sessions
@@ -44,6 +47,10 @@ INTERVALS = {
     'reports': 60,       # the send window is an hour wide; a minute is plenty
     'orphans': 300,      # a dead agent is not urgent, but should not linger
     'drafts': 900,       # the prompt reads these; they need only be fresh-ish
+    # Runs after orphans has had a chance to cap anything, and the conditions
+    # it reports on are measured in hours and days — a minute either way in
+    # noticing them changes nothing.
+    'alerts': 600,
 }
 
 # How many recent local days of draft to rebuild. More than one, so a day whose
@@ -75,6 +82,25 @@ def run_orphans(now=None):
         return close_orphaned_sessions(db, now=now)
 
 
+def run_alerts(now=None):
+    """Tell people when their own tracking stopped working.
+
+    Ordered after orphans in JOBS so a session capped this tick is available to
+    be reported on in the same tick rather than ten minutes later. Dict order is
+    insertion order, and tick() iterates it, so this is load-bearing rather than
+    decorative.
+    """
+    with session_scope() as db:
+        try:
+            results = agent_alerts.run_due(db, active_users(db), now=now)
+        except NotConfigured as e:
+            logger.warning(f'Agent alerts skipped: {e}')
+            return []
+    for email, kind, key, outcome in results:
+        logger.info(f'{kind} for {email} ({key}): {outcome}')
+    return results
+
+
 def run_drafts(now=None):
     now = now or datetime.now(UTC)
     refreshed = 0
@@ -87,7 +113,8 @@ def run_drafts(now=None):
     return refreshed
 
 
-JOBS = {'reports': run_reports, 'orphans': run_orphans, 'drafts': run_drafts}
+JOBS = {'reports': run_reports, 'orphans': run_orphans,
+        'alerts': run_alerts, 'drafts': run_drafts}
 
 
 class Worker:

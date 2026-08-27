@@ -113,9 +113,21 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] H10 Health checks (liveness + readiness) and structured logs
 - [x] H11 Rate limiting on login and ingest
 
+## I. Knowing the tracking itself broke — all NEW
+
+- [x] I1  `orphaned_at` — an end time the server inferred is marked as inferred
+- [x] I2  Alert when a running session had to be capped, with the time lost
+- [x] I3  Alert when a device stops reporting for days
+- [x] I4  Send-once guard — a DB constraint, per session and per silence episode
+- [x] I5  Dormancy re-arms when the agent reports again, with no flag to reset
+- [x] I6  Silent while tracking is paused — a pause is not a fault
+- [x] I7  Opt-out separate from the reports opt-out
+- [x] I8  Agent staleness on the admin team page — shown, never mailed
+- [x] I9  `check-agents [--dry-run]` for inspecting the condition by hand
+
 ---
 
-All 78 done. What is deliberately NOT here, and why:
+All 87 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,
@@ -124,3 +136,11 @@ All 78 done. What is deliberately NOT here, and why:
   is a liability nobody asked for.
 - **No admin control over anyone's pause.** A switch someone else can flip is
   not a control.
+- **No alert when an agent goes quiet during the day.** Telling "the agent
+  crashed at 11am" apart from "she finished at 4pm and shut the laptop" needs
+  working hours nobody is asked for, and the false alarm would train everyone
+  to ignore the channel — taking the real alerts with it. The dormancy alert
+  catches the same fault a few days later, when it is no longer a guess.
+- **No alert to an administrator about somebody else's agent.** They have the
+  team page, which shows the same staleness by looking. Being notified about a
+  colleague's laptop is a different thing from being able to check on it.

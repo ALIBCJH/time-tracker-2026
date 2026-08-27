@@ -73,6 +73,11 @@
   <h1>Reports</h1>
   <label class="check"><input type="checkbox" name="reports_enabled"
     {{ 'checked' if s.reports_enabled }}> Email me weekly and monthly reports</label>
+  <label class="check"><input type="checkbox" name="offline_alerts_enabled"
+    {{ 'checked' if s.offline_alerts_enabled }}> Tell me when tracking stops working</label>
+  <p class="sub">A session the server had to close because your agent went
+    silent, or a device that has not reported in days. Not sent while tracking
+    is paused &mdash; a pause you chose is not a fault.</p>
 
   <label for="private">Never name these in a report</label>
   <textarea id="private" name="private_labels" rows="4"

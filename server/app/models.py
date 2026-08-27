@@ -118,6 +118,12 @@ class UserSettings(Base):
     weekly_send_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=17)
     monthly_send_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=21)
     reports_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Mail about the agent itself rather than about the work: a session the
+    # server had to cap, a device that stopped reporting. Separate from
+    # reports_enabled because "do not send me a weekly summary" and "do not
+    # tell me my tracker is broken" are not the same request.
+    offline_alerts_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False,
+                                                         default=True)
 
     # Ordered [[name, [patterns]], ...] for the monthly work-stream donut, the
     # catch-all every unmatched label falls into, and the labels that are never
@@ -219,6 +225,11 @@ class Session(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set when the server capped this session itself because the agent went
+    # silent. It is the difference between an end time somebody asserted and
+    # one we inferred, and only the inferred kind is worth telling anyone about
+    # — a number that came from a guess should be visible as a guess.
+    orphaned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
 
     __table_args__ = (
@@ -378,6 +389,42 @@ class RateBucket(Base):
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                    primary_key=True)
     count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class AgentAlert(Base):
+    """One row per alert about the tracking itself actually sent.
+
+    The same shape as ReportSend, and for the same reason: the record IS the
+    send-once guard. An alert that fires every time the worker ticks is an
+    alert everybody filters into a folder within a week, and an alert nobody
+    reads is worse than none — it converts a real signal into noise that also
+    hides the next real signal.
+
+    `dedupe_key` is what decides when the same condition may be reported again,
+    and it differs by kind on purpose:
+
+      * session_dropped — the session id. One session, one alert, for ever.
+      * device_dormant  — the device id plus the last_seen_at it went quiet
+        after. When the agent reports again that timestamp moves, so the next
+        silence is a genuinely new episode and is allowed to alert. Nothing has
+        to remember to clear a flag.
+    """
+    __tablename__ = 'agent_alerts'
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    sent_at: Mapped[datetime] = _created_at()
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'kind', 'dedupe_key', name='uq_agent_alerts_dedupe'),
+        CheckConstraint("kind IN ('session_dropped', 'device_dormant')",
+                        name='ck_agent_alerts_kind'),
+        Index('ix_agent_alerts_user_sent', 'user_id', 'sent_at'),
+    )
 
 
 class ReportSend(Base):

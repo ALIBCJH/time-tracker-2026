@@ -24,6 +24,7 @@ def register(app):
     app.cli.add_command(list_users_cmd)
     app.cli.add_command(issue_token_cmd)
     app.cli.add_command(revoke_token_cmd)
+    app.cli.add_command(check_agents_cmd)
 
 
 @click.command('create-user')
@@ -99,6 +100,48 @@ def close_orphans_cmd(dry_run):
         click.echo(f"{'would close' if dry_run else 'closed'} #{c['id']} "
                    f"'{c['project']}' at {c['ended_at'].isoformat(timespec='seconds')} "
                    f"(silent {c['silent_for'] // 60}m)")
+
+
+@click.command('check-agents')
+@click.option('--dry-run', is_flag=True,
+              help='List what would be alerted on without sending or claiming.')
+@with_appcontext
+def check_agents_cmd(dry_run):
+    """Alert people whose own tracking stopped working.
+
+    Runs on a schedule in production; here so the condition can be inspected
+    without waiting for the worker, and so --dry-run can answer "would this
+    have mailed anybody?" before a deploy rather than after.
+    """
+    from datetime import datetime, timezone
+
+    from app.services import alerts as A
+
+    now = datetime.now(timezone.utc)
+    users = db_session.query(User).filter(User.is_active.is_(True)).all()
+
+    if dry_run:
+        pending = 0
+        for user in users:
+            for kind, rows in (('session_dropped', A.dropped_sessions(db_session, user, now=now)),
+                               ('device_dormant', A.dormant_devices(db_session, user, now=now))):
+                for row in rows:
+                    key = A.dedupe_key(kind, row)
+                    if A.already_sent(db_session, user, kind, key):
+                        continue
+                    eligible = '' if A._eligible(user, now) else '  [suppressed: paused or opted out]'
+                    click.echo(f'would alert {user.email}: {kind} {key}{eligible}')
+                    pending += 1
+        if not pending:
+            click.echo('Nothing to alert on.')
+        return
+
+    results = A.run_due(db_session, users, now=now)
+    if not results:
+        click.echo('Nothing to alert on.')
+        return
+    for email, kind, key, outcome in results:
+        click.echo(f'{kind} for {email} ({key}): {outcome}')
 
 
 @click.command('refresh-drafts')

@@ -130,6 +130,8 @@ def api_status():
 @admin_required
 def team():
     """Everyone, with today and this week — each in their own timezone."""
+    from app.services import alerts as A
+
     now = datetime.now(timezone.utc)
     people = db_session.query(User).order_by(User.name).all()
 
@@ -144,6 +146,7 @@ def team():
             'today_seconds': R.day_summary(db_session, person, today, now)['total_seconds'],
             'week_seconds': week['total_seconds'],
             'status': status,
+            'agent': A.device_health(db_session, person, now),
         })
     return render_template('team.html', rows=rows, hm=R.format_hm)
 
@@ -334,6 +337,7 @@ def save_settings():
 
     s.screenshots_enabled = form.get('screenshots_enabled') == 'on'
     s.reports_enabled = form.get('reports_enabled') == 'on'
+    s.offline_alerts_enabled = form.get('offline_alerts_enabled') == 'on'
     s.private_labels = _lines(form.get('private_labels'))
     s.research_labels = _lines(form.get('research_labels'))
     s.streams = _streams(form.get('streams'))

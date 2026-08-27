@@ -50,6 +50,10 @@ def close_orphaned_sessions(db, now=None, silence=SILENCE_BEFORE_ORPHANED, user_
             continue
 
         session.ended_at = alive_until
+        # Stamped so this end time is identifiable later as inferred rather
+        # than asserted — both for the alert that tells the person, and so a
+        # number that came from a guess never passes for one that did not.
+        session.orphaned_at = now
         closed.append({
             'id': session.id,
             'user_id': session.user_id,

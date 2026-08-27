@@ -6,7 +6,7 @@
   <p class="sub">Each person's day is shown in their own timezone.</p>
   <table>
     <tr><th>Person</th><th>Local date</th><th align="right">Today</th>
-        <th align="right">This week</th><th>Now</th></tr>
+        <th align="right">This week</th><th>Now</th><th>Agent</th></tr>
     {% for r in rows %}
     <tr>
       <td>
@@ -20,6 +20,16 @@
       <td>{% if r.status.is_tracking %}
             <span class="tag on"><span class="dot"></span>{{ r.status.project }}</span>
           {% else %}<span class="sub">idle</span>{% endif %}</td>
+      {#- Shown, not pushed. An admin can see a dead agent by looking; nobody
+          is mailed about somebody else's laptop. -#}
+      <td>{% if not r.agent %}<span class="sub">never reported</span>
+          {% elif r.agent.dormant %}
+            <span class="tag stale">silent {{ hm(r.agent.silent_seconds) }}</span>
+            <div class="sub">{{ r.agent.device.name }}</div>
+          {% else %}
+            <span class="sub">{{ hm(r.agent.silent_seconds) }} ago</span>
+            <div class="sub">{{ r.agent.device.name }}</div>
+          {% endif %}</td>
     </tr>
     {% endfor %}
   </table>

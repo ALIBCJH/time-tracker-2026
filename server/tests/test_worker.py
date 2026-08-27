@@ -29,16 +29,21 @@ class Counter:
 
 @pytest.fixture
 def jobs():
-    return {'reports': Counter(), 'orphans': Counter(), 'drafts': Counter()}
+    return {'reports': Counter(), 'orphans': Counter(), 'drafts': Counter(),
+            'disk': Counter()}
 
 
 def make(jobs, **intervals):
+    # Every job in the fixture needs an interval, or due() raises KeyError on
+    # the first tick — which is exactly what the real worker would do too.
     return Worker(intervals={'reports': 60, 'orphans': 300, 'drafts': 900,
-                             **intervals}, jobs=jobs)
+                             'disk': 3600, **intervals}, jobs=jobs)
 
 
 def test_every_job_runs_on_the_first_tick(jobs):
-    assert set(make(jobs).tick(T0)) == {'reports', 'orphans', 'drafts'}
+    """Asserted against the fixture rather than a written-out list, so adding a
+    job cannot leave this passing while ignoring it."""
+    assert set(make(jobs).tick(T0)) == set(jobs)
     assert all(job.calls == 1 for job in jobs.values())
 
 

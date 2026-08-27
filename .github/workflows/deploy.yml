@@ -125,6 +125,12 @@ jobs:
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo "Connected as $(whoami) on $(hostname)"'
           ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'docker --version && docker compose version' \
             || { echo "::error::Docker is not usable by $SSH_USER. Run deploy/bootstrap.sh, then log out and in once."; exit 1; }
+          # Checked on every deploy, not once at setup. The containers come back
+          # after a reboot only if Docker itself starts, and that is drift
+          # nobody notices until an unattended reboot at an unhelpful hour.
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'systemctl is-enabled --quiet docker' \
+            || { echo "::error::Docker is not enabled at boot on the host - a reboot would leave the site down. Fix with: sudo systemctl enable docker"; exit 1; }
+          echo "Docker is present, usable, and starts on boot."
 
       - name: The host is prepared
         run: |

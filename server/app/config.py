@@ -33,6 +33,13 @@ SECRET_KEY = os.environ.get('SECRET_KEY', '')
 # this is idle time and not a countdown from signing in.
 SESSION_IDLE_HOURS = int(os.environ.get('SESSION_IDLE_HOURS', 12))
 
+# When to say the disk is filling. Everything shares one volume — Postgres, the
+# nightly dumps, Docker's layers and, if S3 is not configured, every screen
+# capture — so it fills from several directions at once and the first symptom
+# is Postgres refusing to write.
+DISK_WARN_PERCENT = int(os.environ.get('DISK_WARN_PERCENT', 80))
+DISK_CRITICAL_PERCENT = int(os.environ.get('DISK_CRITICAL_PERCENT', 90))
+
 # Every user gets their own, but a new account has to start somewhere and this
 # is a Nairobi-based team.
 DEFAULT_TIMEZONE = os.environ.get('DEFAULT_TIMEZONE', 'Africa/Nairobi')

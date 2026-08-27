@@ -467,6 +467,9 @@ class AgentAlert(Base):
         after. When the agent reports again that timestamp moves, so the next
         silence is a genuinely new episode and is allowed to alert. Nothing has
         to remember to clear a flag.
+      * disk_space      — the severity, the five-percent band it has reached
+        and the date. So it says something once a day while the disk stays at
+        one level, and again immediately when it gets worse.
     """
     __tablename__ = 'agent_alerts'
 
@@ -480,8 +483,9 @@ class AgentAlert(Base):
 
     __table_args__ = (
         UniqueConstraint('user_id', 'kind', 'dedupe_key', name='uq_agent_alerts_dedupe'),
-        CheckConstraint("kind IN ('session_dropped', 'device_dormant')",
-                        name='ck_agent_alerts_kind'),
+        CheckConstraint(
+            "kind IN ('session_dropped', 'device_dormant', 'disk_space')",
+            name='ck_agent_alerts_kind'),
         Index('ix_agent_alerts_user_sent', 'user_id', 'sent_at'),
     )
 

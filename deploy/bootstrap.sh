@@ -28,6 +28,19 @@ else
   echo "already installed"
 fi
 
+# Asserted rather than assumed. Every container carries restart: unless-stopped,
+# which brings the stack back after a reboot — but only if Docker itself starts.
+# If it does not, a reboot at 3am is a silent outage until a person notices, and
+# a person is a poor monitoring system.
+sudo systemctl enable --now docker >/dev/null 2>&1 || true
+if systemctl is-enabled --quiet docker; then
+  echo "docker starts on boot: yes"
+else
+  echo "docker starts on boot: NO — a reboot would leave the site down." >&2
+  echo "Fix with: sudo systemctl enable docker" >&2
+  exit 1
+fi
+
 say "Installing the AWS CLI"
 if command -v aws >/dev/null; then
   echo "already installed"

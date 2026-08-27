@@ -25,6 +25,7 @@ def register(app):
     app.cli.add_command(issue_token_cmd)
     app.cli.add_command(revoke_token_cmd)
     app.cli.add_command(check_agents_cmd)
+    app.cli.add_command(check_disk_cmd)
 
 
 @click.command('create-user')
@@ -142,6 +143,30 @@ def check_agents_cmd(dry_run):
         return
     for email, kind, key, outcome in results:
         click.echo(f'{kind} for {email} ({key}): {outcome}')
+
+
+@click.command('check-disk')
+@click.option('--dry-run', is_flag=True, help='Report the state without sending.')
+@with_appcontext
+def check_disk_cmd(dry_run):
+    """How full the server's disk is, and warn the administrators if it matters."""
+    from app.services import alerts as A
+
+    state = A.disk_state()
+    click.echo(f"{state['percent']}% used, "
+               f"{state['free_bytes'] / 2**30:.1f} GiB free of "
+               f"{state['total_bytes'] / 2**30:.0f} GiB "
+               f"(warn {state['warn_at']}%, critical {state['critical_at']}%)")
+    if state['level'] is None:
+        click.echo('Nothing to report.')
+        return
+    click.echo(f"Level: {state['level']}")
+    if dry_run:
+        click.echo('Would notify: ' + (', '.join(u.email for u in A.operators(db_session))
+                                       or 'nobody — no admin has alerts enabled'))
+        return
+    for email, _, key, outcome in A.run_disk_check(db_session):
+        click.echo(f'{email} ({key}): {outcome}')
 
 
 @click.command('refresh-drafts')

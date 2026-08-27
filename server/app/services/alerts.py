@@ -39,11 +39,13 @@ broken" and "your colleague's tool is broken, here is a notification about it"
 are different messages, and only the first one helps.
 """
 import logging
+import shutil
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 
-from app.models import AgentAlert, Device, Session
+from app import config
+from app.models import AgentAlert, Device, Session, User
 from app.services import mail
 from app.services.consent import is_paused
 
@@ -65,6 +67,12 @@ DORMANT_AFTER = timedelta(days=3)
 # who has left. Alerting on it is noise, and on a restored database it would be
 # a burst of it.
 DORMANT_MAX = timedelta(days=30)
+
+
+# The path checked for space. Inside a container this is the overlay
+# filesystem, which is backed by the host's disk — so it measures the thing
+# that actually runs out, not the container's own view of itself.
+DISK_PATH = '/'
 
 
 # ── Deciding ─────────────────────────────────────────────────────────────────
@@ -139,6 +147,56 @@ def dormant_devices(db, user, now=None, after=DORMANT_AFTER, maximum=DORMANT_MAX
     return [d for d in devices
             if d.last_seen_at is not None
             and after < (now - d.last_seen_at) <= maximum]
+
+
+def disk_state(path=DISK_PATH,
+               warn=None, critical=None):
+    """How full the disk is, and whether that is worth saying out loud.
+
+    One volume carries Postgres, the nightly dumps, Docker's layers and — when
+    S3 is not configured — every screen capture, so it fills from several
+    directions at once. The first symptom of it being full is Postgres
+    refusing to write, which surfaces as the application failing in ways that
+    look like anything except a disk.
+    """
+    warn = config.DISK_WARN_PERCENT if warn is None else warn
+    critical = config.DISK_CRITICAL_PERCENT if critical is None else critical
+
+    usage = shutil.disk_usage(path)
+    percent = round(100 * usage.used / usage.total) if usage.total else 0
+    level = 'critical' if percent >= critical else ('warning' if percent >= warn else None)
+    return {
+        'percent': percent,
+        'free_bytes': usage.free,
+        'total_bytes': usage.total,
+        'level': level,
+        'warn_at': warn,
+        'critical_at': critical,
+    }
+
+
+def disk_dedupe_key(state, now):
+    """Once a day at one level, and again at once when it gets worse.
+
+    Banded to five percent rather than reported exactly, so a disk drifting
+    between 84 and 85 does not send two messages, while one going from 84 to 91
+    sends the second immediately.
+    """
+    band = (state['percent'] // 5) * 5
+    return f"{state['level']}:{band}:{now.date().isoformat()}"
+
+
+def operators(db):
+    """Who hears about the server itself.
+
+    Administrators, because a full disk is nobody's own tracking going wrong —
+    it is the machine, and only somebody with access to it can act. Still
+    subject to the same opt-out: a disk filling IS tracking about to stop
+    working, which is what that setting covers.
+    """
+    return [u for u in db.query(User).filter(User.is_active.is_(True),
+                                             User.role == 'admin').all()
+            if u.settings.offline_alerts_enabled]
 
 
 def dedupe_key(kind, subject):
@@ -257,6 +315,33 @@ def render(user, kind, subject_row, now=None):
             'action': 'Check that the agent is running, then start a new session.',
         }
         email_subject = f'TimeTracker: session on {subject_row.project} was cut short'
+    elif kind == 'disk_space':
+        state = subject_row
+        gib = state['free_bytes'] / 2**30
+        critical = state['level'] == 'critical'
+        context = {
+            'kicker': 'Server disk',
+            'title': ('The disk is nearly full' if critical
+                      else 'The disk is filling up'),
+            'lead': (f"The server's disk is {state['percent']}% used, with "
+                     f"{gib:.1f} GiB free."),
+            'facts': [
+                ('Used', f"{state['percent']}%"),
+                ('Free', f'{gib:.1f} GiB'),
+                ('Total', f"{state['total_bytes'] / 2**30:.0f} GiB"),
+                ('Warns at', f"{state['warn_at']}%, critical at {state['critical_at']}%"),
+            ],
+            'meaning': (
+                'One volume carries the database, the nightly backups, Docker '
+                'images and — unless screen captures are stored in S3 — every '
+                'capture. When it fills, Postgres stops being able to write, '
+                'and that surfaces as the application failing in ways that look '
+                'like anything except a disk.'),
+            'action': ('Free space now: docker image prune -af, then check '
+                       '/var/backups/ttcloud and whether S3_BUCKET is set.'),
+        }
+        email_subject = (f"TimeTracker: server disk {state['percent']}% full"
+                         + (' — act now' if critical else ''))
     else:
         silent = now - subject_row.last_seen_at
         context = {
@@ -280,7 +365,8 @@ def render(user, kind, subject_row, now=None):
 
     context.update({
         'C': COLOURS,
-        'accent': '#c2410c',
+        'accent': ('#b91c1c' if context.get('kicker') == 'Server disk'
+                   and 'nearly' in context['title'] else '#c2410c'),
         'title_size': 26,
         'sent_at': now.astimezone(local).strftime('%A, %B %d, %Y at %I:%M %p %Z'),
     })
@@ -290,7 +376,8 @@ def render(user, kind, subject_row, now=None):
 def send_one(db, user, kind, subject_row, now=None, settings=None):
     """Claim, render, send. Returns 'sent', 'already-sent' or 'failed'."""
     now = now or datetime.now(UTC)
-    key = dedupe_key(kind, subject_row)
+    key = (disk_dedupe_key(subject_row, now) if kind == 'disk_space'
+           else dedupe_key(kind, subject_row))
 
     if not claim(db, user, kind, key, user.email, sent_at=now):
         return 'already-sent'
@@ -329,4 +416,31 @@ def run_due(db, users, now=None, settings=None):
             results.append((user.email, 'device_dormant', key,
                             send_one(db, user, 'device_dormant', device,
                                      now=now, settings=settings)))
+    return results
+
+
+def run_disk_check(db, now=None, settings=None, path=DISK_PATH):
+    """Warn the administrators when the server's disk is filling.
+
+    Not part of run_due: that iterates people and reports on their own tracking,
+    while this is one fact about the machine that goes to whoever can act on it.
+    Folding it in would mean checking the disk once per user and deciding who
+    among them counts.
+    """
+    now = now or datetime.now(UTC)
+    state = disk_state(path)
+    if state['level'] is None:
+        return []
+
+    key = disk_dedupe_key(state, now)
+    results = []
+    for admin in operators(db):
+        if already_sent(db, admin, 'disk_space', key):
+            continue
+        results.append((admin.email, 'disk_space', key,
+                        send_one(db, admin, 'disk_space', state,
+                                 now=now, settings=settings)))
+    if not results:
+        logger.warning(
+            f"Disk at {state['percent']}% ({state['level']}) and nobody to tell.")
     return results

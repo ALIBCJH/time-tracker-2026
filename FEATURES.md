@@ -123,6 +123,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] H16 Nightly backup wired to actually run, and proven end to end
 - [x] H17 Agent installs as a systemd user service — tracking survives a reboot
 - [x] H18 The installer refuses Wayland rather than tracking nothing silently
+- [x] H19 Backups copied off the instance, after they have been verified
+- [x] H20 Disk-fill warning to administrators, before Postgres cannot write
+- [x] H21 Docker asserted to start on boot — at setup and on every deploy
 
 ## I. Knowing the tracking itself broke — all NEW
 
@@ -179,7 +182,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
-All 130 done. What is deliberately NOT here, and why:
+All 133 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

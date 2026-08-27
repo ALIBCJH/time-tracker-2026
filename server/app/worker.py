@@ -52,6 +52,9 @@ INTERVALS = {
     # it reports on are measured in hours and days — a minute either way in
     # noticing them changes nothing.
     'alerts': 600,
+    # A disk fills over days. Hourly is often enough to act on and rare enough
+    # to be free.
+    'disk': 3600,
 }
 
 # How many recent local days of draft to rebuild. More than one, so a day whose
@@ -112,6 +115,24 @@ def run_alerts(now=None):
     return results
 
 
+def run_disk(now=None):
+    """Warn the administrators before the disk stops Postgres writing.
+
+    Its own job rather than part of run_alerts, because it reports one fact
+    about the machine to whoever can act on it, while that one reports to each
+    person about their own tracking.
+    """
+    with session_scope() as db:
+        try:
+            results = agent_alerts.run_disk_check(db, now=now)
+        except NotConfigured as e:
+            logger.warning(f'Disk alert skipped: {e}')
+            return []
+    for email, kind, key, outcome in results:
+        logger.info(f'{kind} for {email} ({key}): {outcome}')
+    return results
+
+
 def run_drafts(now=None):
     now = now or datetime.now(UTC)
     refreshed = 0
@@ -125,7 +146,7 @@ def run_drafts(now=None):
 
 
 JOBS = {'reports': run_reports, 'orphans': run_orphans,
-        'alerts': run_alerts, 'drafts': run_drafts}
+        'alerts': run_alerts, 'disk': run_disk, 'drafts': run_drafts}
 
 
 class Worker:

@@ -123,6 +123,13 @@ docker compose -f docker-compose.prod.yml logs --tail=100 worker
   `Reports skipped` once per tick rather than retrying.
 - **An agent stopped reporting** — `docker compose exec web flask --app app
   check-agents --dry-run` shows what would be alerted on.
+- **How full is the disk** — `docker compose exec web flask --app app
+  check-disk`. Administrators are warned by email at 80% and again at 90%,
+  hourly at most and once a day per five-percent band. When it fills, Postgres
+  stops writing and the failure looks like anything except a disk.
+- **Will it survive a reboot** — `systemctl is-enabled docker`. Every container
+  restarts itself, but only if Docker starts. Bootstrap asserts this and every
+  deploy re-checks it.
 
 ## 7. Creating the first accounts
 

@@ -61,7 +61,13 @@ jobs:
 
       - name: Run tests
         working-directory: server
-        run: pytest -q
+        # `python -m pytest`, not `pytest`. The -m form puts the working
+        # directory on sys.path; the bare command does not, so `import app`
+        # fails and nothing runs. It is also exactly what a person runs
+        # locally, which is the point — a CI that invokes the suite differently
+        # from every human is a CI that can be green while they are red, and
+        # the other way round.
+        run: python -m pytest -q
 
   agent:
     name: Agent tests
@@ -95,4 +101,6 @@ jobs:
 
       - name: Run tests
         working-directory: agent
-        run: pytest -q
+        # Same reason: the agent's modules are imported by bare name from the
+        # package root, so the working directory has to be on sys.path.
+        run: python -m pytest -q

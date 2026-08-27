@@ -1,0 +1,161 @@
+# Deploy to the AWS host.
+#
+# The stack is docker compose on one instance — Postgres, the web process, the
+# background worker and Caddy — so a deploy is: get this commit onto the host,
+# rebuild, let the web container apply migrations on the way up, and refuse to
+# call it done until the app answers.
+#
+# Nothing here creates infrastructure. The instance, the DNS record and the S3
+# bucket are made once by hand (see docs/DEPLOY.md); this workflow only ships
+# code to something that already exists.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, tag or branch to deploy (blank = this branch). Deploying an older SHA is how you roll back.'
+        required: false
+        type: string
+  push:
+    branches: [main]
+
+# One deploy at a time. Two rsyncs into the same directory, or two compose
+# builds on one small instance, is how a host ends up in a state nobody
+# intended. Never cancelled mid-flight: a half-finished deploy is worse than a
+# slow one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    # The same suite that guards a pull request, on the exact commit being
+    # shipped. A deploy that skips it is a deploy nobody checked.
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to AWS
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Set this environment up with required reviewers in GitHub if you want a
+    # human to approve production deploys; without that it is just a label.
+    environment: production
+
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/timetracker' }}
+      DOMAIN: ${{ secrets.DOMAIN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Blank falls back to the triggering ref, so a plain push deploys
+          # itself and a dispatch can name any commit.
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Authorise against the host
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned rather than scanned. ssh-keyscan trusts whatever answers on
+          # the day, which is exactly the check being skipped.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Ship the code
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          set -euo pipefail
+          # --delete so a file removed in git is removed on the host; without it
+          # a deleted module lingers and keeps being imported.
+          # .env is excluded and never sent: production secrets live on the
+          # instance and are not in this repository or in these logs.
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.env' \
+            --exclude 'server/var' \
+            -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
+            ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
+
+      - name: Rebuild and restart
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST" bash -euo pipefail <<REMOTE
+            cd "$DEPLOY_PATH"
+            test -f .env || { echo "No .env on the host — run deploy/bootstrap.sh first."; exit 1; }
+            # The web container applies migrations in its entrypoint, once,
+            # before serving. The worker deliberately does not.
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+            # Layers from previous builds accumulate quickly on a small disk.
+            docker image prune -f
+          REMOTE
+
+      - name: Wait for the app to answer
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST" bash -euo pipefail <<REMOTE
+            cd "$DEPLOY_PATH"
+            # readyz, not healthz: readiness includes the database, so this
+            # fails if migrations left the schema unusable rather than passing
+            # because a process is merely running.
+            for i in \$(seq 1 60); do
+              if docker compose -f docker-compose.prod.yml exec -T web \
+                   curl -fsS http://localhost:8000/readyz >/dev/null 2>&1; then
+                echo "Ready after \${i}s"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "The app never became ready. Recent logs:"
+            docker compose -f docker-compose.prod.yml logs --tail=80 web
+            exit 1
+          REMOTE
+
+      - name: Verify from the internet
+        # The check that matters to a person: DNS, Caddy's certificate and the
+        # app, end to end. Everything above can pass while the site is
+        # unreachable.
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 10 "https://$DOMAIN/healthz" >/dev/null; then
+              echo "https://$DOMAIN is serving."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "https://$DOMAIN did not answer. Check DNS and the proxy container."
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy — ${{ job.status }}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${{ inputs.ref || github.sha }}\` |"
+            echo "| Host | \`${{ secrets.SSH_HOST }}\` |"
+            echo "| Site | https://${{ secrets.DOMAIN }} |"
+            echo ""
+            echo "To roll back, run this workflow again with an earlier commit in **ref**."
+          } >> "$GITHUB_STEP_SUMMARY"

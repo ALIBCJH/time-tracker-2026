@@ -1,0 +1,98 @@
+# Tests, on every push and every pull request — and callable by the deploy
+# workflow, so a deploy cannot happen without the same suite that guards a
+# pull request having passed on the same commit.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    # The suite spends most of its time creating and dropping a scratch
+    # database per session and doing real round trips. Ten minutes locally,
+    # so the ceiling is set well above it rather than at it.
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        # Without this the first test can reach a server that is listening but
+        # not yet accepting connections, which fails as a confusing timeout.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The suite creates its own ttcloud_test from this connection and drops it
+      # afterwards; the database named here only has to exist.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+      SECRET_KEY: not-a-secret-for-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install
+        working-directory: server
+        # pytest is not an application dependency and is deliberately not in
+        # requirements.txt, which is what the production image installs.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest==8.3.4
+
+      - name: Run tests
+        working-directory: server
+        run: pytest -q
+
+  agent:
+    name: Agent tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # The widget tests build real Qt objects. Offscreen renders them with no
+      # display, which is what makes them runnable on a CI box at all.
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: agent/requirements.txt
+
+      - name: System libraries for Qt
+        # PyQt6 ships its own Qt, but not the graphics libraries it links
+        # against. Without these the import fails on a bare runner.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1
+
+      - name: Install
+        working-directory: agent
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: agent
+        run: pytest -q

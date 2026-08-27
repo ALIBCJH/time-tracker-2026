@@ -6,3 +6,7 @@ Flask==3.1.0
 Flask-Login==0.6.3
 Flask-WTF==1.2.2
 Pillow==11.0.0
+# Imported lazily, only when S3_BUCKET is set — but that is exactly the
+# production configuration, and an optional import that is missing from the
+# image fails at the first screenshot rather than at start-up.
+boto3==1.35.76

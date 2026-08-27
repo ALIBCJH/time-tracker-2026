@@ -112,6 +112,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] H9  Backups + a *tested* restore
 - [x] H10 Health checks (liveness + readiness) and structured logs
 - [x] H11 Rate limiting on login and ingest
+- [x] H12 CI — both suites on every push and pull request
+- [x] H13 Deploy action — tests, ship, rebuild, and prove the site answers
+- [x] H14 Rollback by re-running the action at an earlier commit
+- [x] H15 One-time host bootstrap, and a deploy runbook
 
 ## I. Knowing the tracking itself broke — all NEW
 
@@ -168,7 +172,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ---
 
-All 119 done. What is deliberately NOT here, and why:
+All 123 done. What is deliberately NOT here, and why:
 
 - **No self-service password reset form.** An unauthenticated way to make the
   domain send mail to any address someone types buys nothing behind a private,

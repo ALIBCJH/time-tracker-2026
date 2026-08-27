@@ -3,35 +3,70 @@
 # The stack is docker compose on one instance — Postgres, the web process, the
 # background worker and Caddy — so a deploy is: get this commit onto the host,
 # rebuild, let the web container apply migrations on the way up, and refuse to
-# call it done until the app answers.
+# call it done until the app answers from the public internet.
 #
 # Nothing here creates infrastructure. The instance, the DNS record and the S3
-# bucket are made once by hand (see docs/DEPLOY.md); this workflow only ships
-# code to something that already exists.
+# bucket are made once by hand (docs/DEPLOY.md); this ships code to something
+# that already exists.
+#
+# Manual only, on purpose. Deploying on every push to main is the right end
+# state, but not before a human has watched this succeed once against real
+# infrastructure — until then it would put a red cross on every merge. To turn
+# it on afterwards, add:
+#
+#   push:
+#     branches: [main]
+#
+# and delete the `push` trigger from ci.yml so the tests do not run twice.
 name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Commit, tag or branch to deploy (blank = this branch). Deploying an older SHA is how you roll back.'
+        description: 'Commit, tag or branch to deploy (blank = default branch). An earlier SHA here is how you roll back.'
         required: false
         type: string
-  push:
-    branches: [main]
 
-# One deploy at a time. Two rsyncs into the same directory, or two compose
-# builds on one small instance, is how a host ends up in a state nobody
-# intended. Never cancelled mid-flight: a half-finished deploy is worse than a
-# slow one.
+# One deploy at a time, and never cancelled in flight: two rsyncs into the same
+# directory, or a build interrupted halfway, leaves a host in a state nobody
+# intended. A slow deploy is better than a half-finished one.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    # Fails in seconds with a sentence you can act on, rather than sixty
+    # seconds later inside rsync with a connection error that names nothing.
+    name: Check configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Required secrets are present
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: |
+          set -uo pipefail
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS DOMAIN; do
+            [ -n "${!name:-}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured yet. Missing repository secrets:$missing"
+            echo "See docs/DEPLOY.md section 3 for what each one is."
+            exit 1
+          fi
+          echo "All five secrets are set."
+
   test:
     # The same suite that guards a pull request, on the exact commit being
     # shipped. A deploy that skips it is a deploy nobody checked.
+    needs: preflight
     uses: ./.github/workflows/ci.yml
 
   deploy:
@@ -39,20 +74,36 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Set this environment up with required reviewers in GitHub if you want a
-    # human to approve production deploys; without that it is just a label.
+    # Add required reviewers to this environment in repository settings if a
+    # human should approve production deploys. Without that it is only a label.
     environment: production
 
     env:
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/timetracker' }}
       DOMAIN: ${{ secrets.DOMAIN }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      # Fail fast and never prompt. An ssh waiting on a question is a job that
+      # burns its whole timeout saying nothing.
+      SSH_OPTS: -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15
 
     steps:
       - uses: actions/checkout@v4
         with:
-          # Blank falls back to the triggering ref, so a plain push deploys
-          # itself and a dispatch can name any commit.
+          # Blank falls back to the commit this run was started from.
           ref: ${{ inputs.ref || github.sha }}
+
+      - name: Guard the target path
+        run: |
+          set -euo pipefail
+          # rsync --delete against an empty or shallow path would delete far
+          # more than this project. Cheap check, catastrophic thing to miss.
+          case "$DEPLOY_PATH" in
+            /|/root|/home|/etc|/usr|/var|"")
+              echo "::error::DEPLOY_PATH is '$DEPLOY_PATH', which is not a project directory."
+              exit 1 ;;
+          esac
+          echo "Deploying into $DEPLOY_PATH"
 
       - name: Authorise against the host
         env:
@@ -63,21 +114,32 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Pinned rather than scanned. ssh-keyscan trusts whatever answers on
-          # the day, which is exactly the check being skipped.
+          # Pinned, not scanned. ssh-keyscan at deploy time trusts whatever
+          # answers on the day, which is precisely the check being skipped.
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Reach the host
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'echo "Connected as $(whoami) on $(hostname)"'
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" 'docker --version && docker compose version' \
+            || { echo "::error::Docker is not usable by $SSH_USER. Run deploy/bootstrap.sh, then log out and in once."; exit 1; }
+
+      - name: The host is prepared
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" "test -f '$DEPLOY_PATH/.env'" \
+            || { echo "::error::No .env at $DEPLOY_PATH on the host. Run deploy/bootstrap.sh there first — production secrets live on the instance and are never sent from here."; exit 1; }
+          echo "Found $DEPLOY_PATH/.env"
+
       - name: Ship the code
-        env:
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           set -euo pipefail
           # --delete so a file removed in git is removed on the host; without it
           # a deleted module lingers and keeps being imported.
-          # .env is excluded and never sent: production secrets live on the
-          # instance and are not in this repository or in these logs.
+          # .env is excluded and never sent: production secrets stay on the
+          # instance, out of this repository and out of these logs.
           rsync -az --delete \
             --exclude '.git' \
             --exclude '.github' \
@@ -86,37 +148,33 @@ jobs:
             --exclude '*.pyc' \
             --exclude '.env' \
             --exclude 'server/var' \
-            -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
+            -e "ssh $SSH_OPTS" \
             ./ "$SSH_USER@$SSH_HOST:$DEPLOY_PATH/"
 
       - name: Rebuild and restart
-        env:
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST" bash -euo pipefail <<REMOTE
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" bash -euo pipefail <<REMOTE
             cd "$DEPLOY_PATH"
-            test -f .env || { echo "No .env on the host — run deploy/bootstrap.sh first."; exit 1; }
+            # Free space before building, not after: a build that fills the
+            # disk fails in a way that is tedious to unpick by hand.
+            docker image prune -f >/dev/null 2>&1 || true
+            df -h / | tail -1
             # The web container applies migrations in its entrypoint, once,
             # before serving. The worker deliberately does not.
             docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
-            # Layers from previous builds accumulate quickly on a small disk.
-            docker image prune -f
+            docker image prune -f >/dev/null 2>&1 || true
           REMOTE
 
       - name: Wait for the app to answer
-        env:
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$SSH_USER@$SSH_HOST" bash -euo pipefail <<REMOTE
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" bash -euo pipefail <<REMOTE
             cd "$DEPLOY_PATH"
-            # readyz, not healthz: readiness includes the database, so this
-            # fails if migrations left the schema unusable rather than passing
-            # because a process is merely running.
-            for i in \$(seq 1 60); do
+            # readyz, not healthz: readiness includes the database, so a
+            # migration that left the schema unusable fails the deploy instead
+            # of passing because a process happens to be running.
+            for i in \$(seq 1 90); do
               if docker compose -f docker-compose.prod.yml exec -T web \
                    curl -fsS http://localhost:8000/readyz >/dev/null 2>&1; then
                 echo "Ready after \${i}s"
@@ -124,25 +182,35 @@ jobs:
               fi
               sleep 1
             done
-            echo "The app never became ready. Recent logs:"
-            docker compose -f docker-compose.prod.yml logs --tail=80 web
+            echo "The app never became ready. What the host looks like:"
+            # Each diagnostic is allowed to fail on its own. Under set -e a
+            # failing 'ps' would abort the script before the logs printed —
+            # losing exactly the output somebody needs at exactly the moment
+            # they need it.
+            docker compose -f docker-compose.prod.yml ps || true
+            docker compose -f docker-compose.prod.yml logs --tail=80 web || true
+            docker compose -f docker-compose.prod.yml logs --tail=30 db || true
             exit 1
           REMOTE
 
       - name: Verify from the internet
-        # The check that matters to a person: DNS, Caddy's certificate and the
+        # The only check a person cares about: DNS, Caddy's certificate and the
         # app, end to end. Everything above can pass while the site is
-        # unreachable.
+        # unreachable. A first deploy may need a minute while the certificate
+        # is issued, hence the patience.
         run: |
           set -euo pipefail
-          for i in $(seq 1 20); do
+          for i in $(seq 1 24); do
             if curl -fsS --max-time 10 "https://$DOMAIN/healthz" >/dev/null; then
               echo "https://$DOMAIN is serving."
               exit 0
             fi
             sleep 5
           done
-          echo "https://$DOMAIN did not answer. Check DNS and the proxy container."
+          echo "::error::https://$DOMAIN did not answer in two minutes."
+          echo "The app is up on the host, so look at DNS and the proxy container:"
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_PATH' && docker compose -f docker-compose.prod.yml logs --tail=40 proxy" || true
           exit 1
 
       - name: Summary
@@ -155,7 +223,9 @@ jobs:
             echo "|---|---|"
             echo "| Commit | \`${{ inputs.ref || github.sha }}\` |"
             echo "| Host | \`${{ secrets.SSH_HOST }}\` |"
+            echo "| Path | \`$DEPLOY_PATH\` |"
             echo "| Site | https://${{ secrets.DOMAIN }} |"
             echo ""
-            echo "To roll back, run this workflow again with an earlier commit in **ref**."
+            echo "Roll back by running this workflow again with an earlier commit in **ref**."
+            echo "Migrations are not reversed automatically — see docs/DEPLOY.md section 5."
           } >> "$GITHUB_STEP_SUMMARY"

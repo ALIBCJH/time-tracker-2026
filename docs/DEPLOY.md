@@ -67,14 +67,33 @@ Scanning trusts whatever answers on the day, which is the check being skipped.
 
 **Actions → Deploy → Run workflow.**
 
-It runs the full test suite on that exact commit first, and stops if anything
-fails. Then it syncs, rebuilds, waits for `/readyz` inside the container, and
-finally checks `https://<domain>/healthz` from outside — DNS, certificate and
-app, end to end.
+It is manual on purpose. Deploying on every push to `main` is the right end
+state, but not before someone has watched this succeed once against real
+infrastructure — until then it would put a red cross on every merge. Turning it
+on afterwards is four lines, and the workflow says which.
 
-Pushing to `main` deploys automatically. To require a human first, add required
-reviewers to the `production` environment in repository settings; the workflow
-already targets it.
+The run goes in order, and stops at the first thing that is wrong:
+
+1. **Check configuration** — all five secrets present. Fails in seconds naming
+   the missing ones, rather than a minute later inside `rsync`.
+2. **Tests** — both suites, on the exact commit being shipped.
+3. **Guard the target path** — refuses to `rsync --delete` into `/`, `/home`
+   and similar.
+4. **Reach the host** — SSH works, and Docker is usable by that user. If
+   `bootstrap.sh` ran but nobody logged out and back in, this is where it says
+   so.
+5. **The host is prepared** — `.env` exists on the instance.
+6. **Ship, rebuild, restart** — rsync, then `compose up --build`. Migrations
+   run in the web container's entrypoint, once.
+7. **Wait for `/readyz`** — inside the container, for up to 90 seconds.
+   Readiness rather than liveness, so a failed migration fails the deploy. On
+   failure it prints `ps` and the last of the `web` and `db` logs.
+8. **Verify from the internet** — `https://<domain>/healthz`, for up to two
+   minutes. The only check covering DNS, the certificate and the app together;
+   a first deploy may spend some of that waiting for Caddy to be issued one.
+
+To require a human before step 3, add required reviewers to the `production`
+environment in repository settings; the workflow already targets it.
 
 ## 5. Rolling back
 
